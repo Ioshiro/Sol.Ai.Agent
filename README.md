@@ -17,7 +17,7 @@ Demo di voice agent per una stack ibrida, con il massimo possibile tenuto vicino
 | `livekit` | server LiveKit in modalità dev | `7880/tcp`, `7881/tcp`, `50000-50020/udp` |
 | `sip` | LiveKit SIP | `5060/udp`, `10000-10100/udp` |
 | `lk-bootstrap` | inizializza trunk e dispatch rule SIP | one-shot |
-| `llm-service` | orchestratore OpenAI-compatible locale | `8080/tcp` |
+| `llm-service` | orchestratore OpenAI-compatible locale | `8080/tcp` nel container, `8081/tcp` sull'host |
 
 ### Fuori dal Compose
 
@@ -71,7 +71,7 @@ OPENAI_API_KEY=...
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TTS_VOICE=alloy
-LLM_SERVICE_BASE_URL=http://localhost:8080/v1
+LLM_SERVICE_BASE_URL=http://localhost:8081/v1
 LLM_SERVICE_MODEL=qwen3.5-4b
 LLM_SERVICE_API_KEY=lm-studio
 RUNPOD_LLM_BASE_URL=https://your-runpod-endpoint/v1
