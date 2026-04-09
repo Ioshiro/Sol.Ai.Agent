@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Trace;
 using SolAI.Pipecat.LLMService.Contracts;
+using SolAI.Pipecat.LLMService.Data;
 using SolAI.Pipecat.LLMService.Options;
 using SolAI.Pipecat.LLMService.Services;
 
@@ -13,98 +15,131 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+ options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing =>
-    {
-        var langfuseHost = builder.Configuration["LANGFUSE_HOST"] ?? "http://localhost:3000";
-        var publicKey = builder.Configuration["LANGFUSE_PUBLIC_KEY"] ?? "lf_pk_local_demo";
-        var secretKey = builder.Configuration["LANGFUSE_SECRET_KEY"] ?? "lf_sk_local_demo";
-        var auth = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{publicKey}:{secretKey}"));
+builder.Services.AddDbContextFactory<TicketsDbContext>(options =>
+ options.UseInMemoryDatabase("tickets"));
 
-        tracing
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddSource(SemanticKernelOpenAIChatGateway.ActivitySourceName)
-            .AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri($"{langfuseHost.TrimEnd('/')}/api/public/otel");
-                options.Protocol = OtlpExportProtocol.HttpProtobuf;
-                options.Headers = $"Authorization=Basic {auth}";
-            });
-    });
+builder.Services.AddOpenTelemetry()
+ .WithTracing(tracing =>
+ {
+  var langfuseHost = builder.Configuration["LANGFUSE_HOST"] ?? "http://localhost:3000";
+  var publicKey = builder.Configuration["LANGFUSE_PUBLIC_KEY"] ?? "lf_pk_local_demo";
+  var secretKey = builder.Configuration["LANGFUSE_SECRET_KEY"] ?? "lf_sk_local_demo";
+  var auth = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{publicKey}:{secretKey}"));
+
+  tracing
+   .AddAspNetCoreInstrumentation()
+   .AddHttpClientInstrumentation()
+   .AddSource(SemanticKernelOpenAIChatGateway.ActivitySourceName)
+   .AddOtlpExporter(options =>
+   {
+    options.Endpoint = new Uri($"{langfuseHost.TrimEnd('/')}/api/public/otel");
+    options.Protocol = OtlpExportProtocol.HttpProtobuf;
+    options.Headers = $"Authorization=Basic {auth}";
+   });
+ });
 
 builder.Services
-    .AddOptions<LlmServiceOptions>()
-    .Bind(builder.Configuration.GetSection(LlmServiceOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
+ .AddOptions<LlmServiceOptions>()
+ .Bind(builder.Configuration.GetSection(LlmServiceOptions.SectionName))
+ .ValidateDataAnnotations()
+ .ValidateOnStart();
 
 builder.Services.AddSingleton<IOpenAIChatGateway, SemanticKernelOpenAIChatGateway>();
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+ var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<TicketsDbContext>>();
+ using var dbContext = factory.CreateDbContext();
+ dbContext.Database.EnsureCreated();
+ if (!dbContext.Tickets.Any())
+ {
+  dbContext.Tickets.AddRange(
+   new Ticket
+   {
+    Titolo = "Ticket demo aperto",
+    Descrizione = "Ticket di esempio per la demo iniziale.",
+    DataCreazione = DateTime.UtcNow.AddDays(-2),
+    Stato = Ticket.STATO_APERTO,
+    UtenteCreazione = "seed"
+   },
+   new Ticket
+   {
+    Titolo = "Ticket demo chiuso",
+    Descrizione = "Ticket di esempio già chiuso.",
+    DataCreazione = DateTime.UtcNow.AddDays(-10),
+    DataChiusura = DateTime.UtcNow.AddDays(-1),
+    Stato = Ticket.STATO_CHIUSO,
+    UtenteCreazione = "seed",
+    UtenteChiusura = "seed",
+    Note = "Chiuso per verifica baseline"
+   });
+  dbContext.SaveChanges();
+ }
+}
+
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+ app.UseSwagger();
+ app.UseSwaggerUI();
 }
 
 app.MapHealthChecks("/health");
-
 app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.MapGet("/v1/models", (IOpenAIChatGateway gateway) =>
 {
-    Activity.Current?.SetTag("langfuse.trace.name", "list-models");
+ Activity.Current?.SetTag("langfuse.trace.name", "list-models");
 
-    var models = gateway.GetModels();
-    Activity.Current?.SetTag("llm.models.count", models.Data.Count);
+ var models = gateway.GetModels();
+ Activity.Current?.SetTag("llm.models.count", models.Data.Count);
 
-    return Results.Ok(models);
+ return Results.Ok(models);
 })
 .WithName("ListModels");
 
 app.MapPost("/v1/chat/completions", async (
-    OpenAIChatCompletionRequest request,
-    IOpenAIChatGateway gateway,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
+ OpenAIChatCompletionRequest request,
+ IOpenAIChatGateway gateway,
+ HttpContext httpContext,
+ CancellationToken cancellationToken) =>
 {
-    Activity.Current?.SetTag("langfuse.trace.name", "chat-completions");
-    Activity.Current?.SetTag("llm.request.stream", request.Stream);
-    Activity.Current?.SetTag("llm.request.message_count", request.Messages.Count);
-    Activity.Current?.SetTag("llm.request.model", request.Model ?? string.Empty);
+ Activity.Current?.SetTag("langfuse.trace.name", "chat-completions");
+ Activity.Current?.SetTag("llm.request.stream", request.Stream);
+ Activity.Current?.SetTag("llm.request.message_count", request.Messages.Count);
+ Activity.Current?.SetTag("llm.request.model", request.Model ?? string.Empty);
 
-    if (request.Messages.Count == 0)
-    {
-        Activity.Current?.SetTag("llm.request.valid", false);
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["messages"] = ["E' richiesto almeno un messaggio."]
-        });
-    }
+ if (request.Messages.Count == 0)
+ {
+  Activity.Current?.SetTag("llm.request.valid", false);
+  return Results.ValidationProblem(new Dictionary<string, string[]>
+  {
+   ["messages"] = ["E' richiesto almeno un messaggio."]
+  });
+ }
 
-    Activity.Current?.SetTag("llm.request.valid", true);
+ Activity.Current?.SetTag("llm.request.valid", true);
 
-    if (request.Stream)
-    {
-        Activity.Current?.SetTag("llm.request.mode", "stream");
-        await gateway.WriteStreamingCompletionAsync(request, httpContext.Response, cancellationToken);
-        return Results.Empty;
-    }
+ if (request.Stream)
+ {
+  Activity.Current?.SetTag("llm.request.mode", "stream");
+  await gateway.WriteStreamingCompletionAsync(request, httpContext.Response, cancellationToken);
+  return Results.Empty;
+ }
 
-    Activity.Current?.SetTag("llm.request.mode", "non_stream");
-    var response = await gateway.CreateCompletionAsync(request, cancellationToken);
-    Activity.Current?.SetTag("llm.response.model", response.Model);
-    Activity.Current?.SetTag("llm.response.choice_count", response.Choices.Count);
+ Activity.Current?.SetTag("llm.request.mode", "non_stream");
+ var response = await gateway.CreateCompletionAsync(request, cancellationToken);
+ Activity.Current?.SetTag("llm.response.model", response.Model);
+ Activity.Current?.SetTag("llm.response.choice_count", response.Choices.Count);
 
-    return Results.Ok(response);
+ return Results.Ok(response);
 })
 .WithName("CreateChatCompletion");
 
