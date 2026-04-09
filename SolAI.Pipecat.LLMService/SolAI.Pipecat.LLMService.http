@@ -1,0 +1,43 @@
+@SolAI.Pipecat.LLMService_HostAddress = http://localhost:5077
+
+GET {{SolAI.Pipecat.LLMService_HostAddress}}/v1/models
+Accept: application/json
+
+###
+
+POST {{SolAI.Pipecat.LLMService_HostAddress}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "qwen3.5-4b",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Sei un assistente conciso che risponde sempre in italiano."
+    },
+    {
+      "role": "user",
+      "content": "Che ore sono e quali sono gli orari del supporto?"
+    }
+  ],
+  "stream": false,
+  "temperature": 0.2
+}
+
+###
+
+POST {{SolAI.Pipecat.LLMService_HostAddress}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "qwen3.5-4b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Dammi lo stato dell'ordine ORD-1024"
+    }
+  ],
+  "stream": true
+}
+
+###

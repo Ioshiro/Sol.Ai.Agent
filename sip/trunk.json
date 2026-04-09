@@ -1,0 +1,7 @@
+{
+  "trunk": {
+    "name": "asterisk-inbound",
+    "allowedAddresses": ["192.168.47.90/32"],
+    "numbers": ["700"]
+  }
+}

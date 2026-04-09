@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+.vs/
+models/
+SolAI.Pipecat.LLMService/bin/
+SolAI.Pipecat.LLMService/obj/
+conversation_export.md

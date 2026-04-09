@@ -1,0 +1,73 @@
+services:
+  redis:
+    image: redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - 6379:6379
+
+  livekit:
+    image: livekit/livekit-server
+    command: --dev --bind 0.0.0.0 --redis-host redis:6379
+    ports:
+      - 7880:7880
+      - 7881:7881
+      - 50000-50020:50000-50020/udp
+    depends_on:
+      redis:
+        condition: service_started
+
+  sip:
+    image: livekit/sip
+    ports:
+      - 5060:5060/udp
+      - 10000-10100:10000-10100/udp
+    volumes:
+      - ./sip/config.yaml:/sip/config.yaml:ro
+    depends_on:
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  lk-bootstrap:
+    image: debian:bookworm-slim
+    depends_on:
+      livekit:
+        condition: service_started
+      sip:
+        condition: service_started
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+    volumes:
+      - ./sip:/work/sip:ro
+      - ./scripts:/work/scripts:ro
+    entrypoint: ["/bin/bash", "/work/scripts/bootstrap_livekit_sip.sh"]
+    restart: "no"
+
+  llm-service:
+    build:
+      context: ./SolAI.Pipecat.LLMService
+      dockerfile: Dockerfile
+    image: solai-pipecat-llmservice:latest
+    ports:
+      - 8080:8080
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      LlmService__UpstreamEndpoint: ${RUNPOD_LLM_BASE_URL}
+      LlmService__ApiKey: ${RUNPOD_LLM_API_KEY}
+      LlmService__DefaultModel: ${RUNPOD_LLM_MODEL}
+      LlmService__ServerInstruction: >-
+        Sei un assistente vocale locale. Rispondi in italiano, in modo chiaro e sintetico.
+        Per richieste su ticket, ticket aperti, dettaglio ticket, stato ticket, ordini, pratiche o altri dati operativi,
+        devi usare prima i tool lato server quando disponibili. Se manca un dato necessario per usare il tool,
+        chiedi una sola informazione mancante invece di inventare la risposta.
+      LlmService__StandardErrorMessage: Mi dispiace, al momento il servizio linguistico non e' raggiungibile. Riprova tra qualche istante.
+    depends_on:
+      redis:
+        condition: service_started
+
+volumes:
+  redis_data:
