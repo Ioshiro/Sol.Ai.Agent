@@ -39,6 +39,32 @@ Compila almeno questi valori:
 - `LlmService__ApiKey`
 - `LlmService__DefaultModel`
 
+## Installare `uv`
+
+Serve solo se vuoi avviare gli agent Python fuori da Docker.
+
+### Windows
+
+Con WinGet:
+
+```powershell
+winget install --id=astral-sh.uv -e
+```
+
+In alternativa, con PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### Linux / macOS
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Se il binario non entra automaticamente nel `PATH`, riapri il terminale oppure aggiungi la directory di installazione al `PATH`.
+
 ## Avvio infrastruttura locale
 
 ```bash

@@ -22,9 +22,9 @@ class AppConfig:
     @classmethod
     def load(cls, *, require_llm_model: bool = True) -> "AppConfig":
         load_dotenv()
-        llm_service_model = os.getenv("LLM_SERVICE_MODEL", "").strip()
+        llm_service_model = os.getenv("LlmService__DefaultModel", "").strip()
         if require_llm_model and not llm_service_model:
-            raise ValueError("LLM_SERVICE_MODEL is required. Set it in your .env file.")
+            raise ValueError("LlmService__DefaultModel is required. Set it in your .env file.")
 
         return cls(
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
@@ -32,9 +32,9 @@ class AppConfig:
             openai_stt_model=os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe"),
             openai_tts_model=os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
             openai_tts_voice=os.getenv("OPENAI_TTS_VOICE", "alloy"),
-            llm_service_base_url=os.getenv("LLM_SERVICE_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/"),
+            llm_service_base_url=os.getenv("LlmService__UpstreamEndpoint", "http://127.0.0.1:8080/v1").rstrip("/"),
             llm_service_model=llm_service_model,
-            llm_service_api_key=os.getenv("LLM_SERVICE_API_KEY", "lm-studio").strip(),
+            llm_service_api_key=os.getenv("LlmService__ApiKey", "lm-studio").strip(),
             assistant_language=os.getenv("ASSISTANT_LANGUAGE", "it"),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
