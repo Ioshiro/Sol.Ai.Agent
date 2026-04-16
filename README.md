@@ -35,10 +35,9 @@ cp .env.example .env
 Compila almeno questi valori:
 
 - `OPENAI_API_KEY`
-- `LLM_SERVICE_MODEL`
-- `RUNPOD_LLM_BASE_URL`
-- `RUNPOD_LLM_MODEL`
-- `RUNPOD_LLM_API_KEY`
+- `LlmService__UpstreamEndpoint`
+- `LlmService__ApiKey`
+- `LlmService__DefaultModel`
 
 ## Avvio infrastruttura locale
 
@@ -71,12 +70,9 @@ OPENAI_API_KEY=...
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TTS_VOICE=alloy
-LLM_SERVICE_BASE_URL=http://localhost:8081/v1
-LLM_SERVICE_MODEL=qwen3.5-4b
-LLM_SERVICE_API_KEY=lm-studio
-RUNPOD_LLM_BASE_URL=https://your-runpod-endpoint/v1
-RUNPOD_LLM_MODEL=qwen3.5-4b
-RUNPOD_LLM_API_KEY=...
+LlmService__UpstreamEndpoint=https://your-runpod-endpoint/v1
+LlmService__ApiKey=...
+LlmService__DefaultModel=qwen3.5-4b
 ```
 
 ## Note sul servizio `.NET`
