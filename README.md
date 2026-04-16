@@ -25,6 +25,7 @@ Demo di voice agent per una stack ibrida, con il massimo possibile tenuto vicino
 - `agent_SIP.py` — worker SIP separato
 - OpenAI API — STT/TTS
 - Runpod — upstream del servizio `.NET`
+- LiveKit turn detector non è usato nel baseline attuale: l'endpointing avviene senza `MultilingualModel`
 
 ## Setup
 

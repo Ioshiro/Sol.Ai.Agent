@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
 from livekit.plugins import openai, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from app.config import AppConfig
 from app.logging_utils import configure_logging
@@ -43,7 +42,6 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
-        turn_detection=MultilingualModel(),
         stt=openai.STT(model=config.openai_stt_model, base_url=config.openai_base_url, api_key=config.openai_api_key),
         llm=openai.LLM(
             model=config.llm_service_model,
