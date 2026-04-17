@@ -44,7 +44,7 @@ services:
     volumes:
       - ./sip:/work/sip:ro
       - ./scripts:/work/scripts:ro
-    entrypoint: ["/bin/bash", "/work/scripts/bootstrap_livekit_sip.sh"]
+    entrypoint: ["/bin/sh", "/work/scripts/bootstrap_livekit_sip.sh"]
     restart: "no"
 
   llm-service:

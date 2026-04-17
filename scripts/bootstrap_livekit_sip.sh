@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update >/dev/null
 apt-get install -y curl ca-certificates bash jq tar >/dev/null
 
-curl -sSL https://get.livekit.io/cli | bash >/dev/null
+curl -fsSL https://get.livekit.io/cli | bash >/dev/null
 export PATH="/root/.livekit/bin:$PATH"
 
 echo "Waiting for LiveKit API..."

@@ -83,6 +83,8 @@ uv sync
 uv run agent.py console
 ```
 
+`console` usa audio locale (microfono e speaker dell'host). Su una macchina remota o headless senza device audio disponibili fallisce all'avvio; in quel caso usa una postazione con audio reale oppure verifica i device con `lk-agents console --list-devices`.
+
 ### Worker SIP
 
 ```bash
