@@ -14,14 +14,10 @@ until curl -fsS http://livekit:7880 >/dev/null; do
 done
 
 echo "Creating SIP inbound trunk..."
-if ! lk sip inbound create /work/sip/trunk.json; then
-  echo "Inbound trunk create returned non-zero, continuing (it may already exist)."
-fi
+lk sip inbound create /work/sip/trunk.json || echo "Inbound trunk create returned non-zero, continuing (it may already exist)."
 
 echo "Creating SIP dispatch rule..."
-if ! lk sip dispatch create /work/sip/dispatch-rule.json; then
-  echo "Dispatch rule create returned non-zero, continuing (it may already exist)."
-fi
+lk sip dispatch create /work/sip/dispatch-rule.json || echo "Dispatch rule create returned non-zero, continuing (it may already exist)."
 
 echo "Current SIP inbound trunks:"
 lk sip inbound list || true
