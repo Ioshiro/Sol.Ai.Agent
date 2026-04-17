@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -e
 
 export DEBIAN_FRONTEND=noninteractive
 
