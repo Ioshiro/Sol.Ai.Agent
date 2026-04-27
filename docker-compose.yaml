@@ -59,6 +59,9 @@ services:
       RUNPOD_LLM_BASE_URL: ${RUNPOD_LLM_BASE_URL}
       RUNPOD_LLM_API_KEY: ${RUNPOD_LLM_API_KEY}
       RUNPOD_LLM_MODEL: ${RUNPOD_LLM_MODEL}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LlmService__ServerInstruction: >-
         Sei un assistente vocale locale. Rispondi in italiano, in modo chiaro e sintetico.
         Per richieste su ticket, ticket aperti, dettaglio ticket, stato ticket, ordini, pratiche o altri dati operativi,

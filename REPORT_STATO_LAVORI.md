@@ -8,6 +8,7 @@ Portare il repository a un baseline pulito con questa architettura:
 
 - STT e TTS via API OpenAI
 - LLM servito dal progetto `.NET` locale, che inoltra a Runpod
+- osservabilità centralizzata via Langfuse
 - infrastruttura locale tenuta in Docker Compose per quanto possibile
 - agent Python lasciati esterni al Compose
 
@@ -21,6 +22,7 @@ Portare il repository a un baseline pulito con questa architettura:
   - Runpod come upstream del servizio `.NET`
 - Aggiornati `agent.py` e `agent_SIP.py` per usare i plugin OpenAI di LiveKit e il backend LLM locale.
 - Integrato `SolAI.Pipecat.LLMService` nello stack Docker Compose.
+- Aggiunta osservabilità Langfuse per il trace root degli agent Python, gli span OpenAI automatici per STT/LLM/TTS e gli span del servizio `.NET`.
 - Aggiornati `.env.example`, `README.md` e il report stesso.
 
 ### Fuori perimetro volontario
@@ -44,6 +46,7 @@ Portare il repository a un baseline pulito con questa architettura:
 
 - OpenAI per STT e TTS
 - Runpod come upstream LLM
+- Langfuse per l'osservabilità del flow
 
 ### Worker esterni al Compose
 
@@ -59,9 +62,12 @@ Portare il repository a un baseline pulito con questa architettura:
 ## Rischi e punti da verificare
 
 - Il servizio `.NET` richiede che `RUNPOD_LLM_BASE_URL`, `RUNPOD_LLM_MODEL` e `RUNPOD_LLM_API_KEY` siano impostati correttamente.
+- Per vedere i trace su Langfuse servono anche `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` e `LANGFUSE_SECRET_KEY`.
 - Le API OpenAI usate per STT/TTS devono essere raggiungibili dal runtime degli agent.
 - Il daemon Docker locale deve essere attivo per build/run del compose.
 
 ## Prossimo passo consigliato
 
 Validare `docker compose config` e poi avviare lo stack con `docker compose up --build`.
+
+Se l'obiettivo è analizzare performance e tempi di risposta, aprire anche Langfuse e verificare il trace root della sessione e gli span OpenAI per STT/LLM/TTS.

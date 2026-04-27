@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Exporter;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using SolAI.Pipecat.LLMService.Contracts;
 using SolAI.Pipecat.LLMService.Data;
@@ -22,9 +23,10 @@ builder.Services.AddDbContextFactory<TicketsDbContext>(options =>
  options.UseInMemoryDatabase("tickets"));
 
 builder.Services.AddOpenTelemetry()
+ .ConfigureResource(resource => resource.AddService("llm-service"))
  .WithTracing(tracing =>
  {
-  var langfuseHost = builder.Configuration["LANGFUSE_HOST"] ?? "http://localhost:3000";
+  var langfuseBaseUrl = builder.Configuration["LANGFUSE_BASE_URL"] ?? "http://localhost:3000";
   var publicKey = builder.Configuration["LANGFUSE_PUBLIC_KEY"] ?? "lf_pk_local_demo";
   var secretKey = builder.Configuration["LANGFUSE_SECRET_KEY"] ?? "lf_sk_local_demo";
   var auth = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{publicKey}:{secretKey}"));
@@ -35,7 +37,7 @@ builder.Services.AddOpenTelemetry()
    .AddSource(SemanticKernelOpenAIChatGateway.ActivitySourceName)
    .AddOtlpExporter(options =>
    {
-    options.Endpoint = new Uri($"{langfuseHost.TrimEnd('/')}/api/public/otel");
+    options.Endpoint = new Uri($"{langfuseBaseUrl.TrimEnd('/')}/api/public/otel");
     options.Protocol = OtlpExportProtocol.HttpProtobuf;
     options.Headers = $"Authorization=Basic {auth}";
    });
