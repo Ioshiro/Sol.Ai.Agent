@@ -61,7 +61,7 @@ Portare il repository a un baseline pulito con questa architettura:
 
 ## Rischi e punti da verificare
 
-- Il servizio `.NET` richiede che `RUNPOD_LLM_BASE_URL`, `RUNPOD_LLM_MODEL` e `RUNPOD_LLM_API_KEY` siano impostati correttamente.
+- Il servizio `.NET` legge `LlmService__UpstreamEndpoint`, `LlmService__DefaultModel` e `LlmService__ApiKey`; nel compose vengono alimentati da `RUNPOD_LLM_BASE_URL`, `RUNPOD_LLM_MODEL` e `RUNPOD_LLM_API_KEY`.
 - Per vedere i trace su Langfuse servono anche `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` e `LANGFUSE_SECRET_KEY`.
 - Le API OpenAI usate per STT/TTS devono essere raggiungibili dal runtime degli agent.
 - Il daemon Docker locale deve essere attivo per build/run del compose.

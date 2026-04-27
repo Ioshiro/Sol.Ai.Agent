@@ -56,9 +56,9 @@ services:
       - 8081:8080
     environment:
       ASPNETCORE_URLS: http://+:8080
-      RUNPOD_LLM_BASE_URL: ${RUNPOD_LLM_BASE_URL}
-      RUNPOD_LLM_API_KEY: ${RUNPOD_LLM_API_KEY}
-      RUNPOD_LLM_MODEL: ${RUNPOD_LLM_MODEL}
+      LlmService__UpstreamEndpoint: ${RUNPOD_LLM_BASE_URL}
+      LlmService__ApiKey: ${RUNPOD_LLM_API_KEY}
+      LlmService__DefaultModel: ${RUNPOD_LLM_MODEL}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}

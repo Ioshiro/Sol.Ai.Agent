@@ -144,7 +144,7 @@ Per avviare tutto dal repository basta `docker compose up --build`.
 - `agent.py` e `agent_SIP.py` restano esterni al compose per via del microfono/speaker dell'host e dei flussi di esecuzione interattivi.
 - `LANGFUSE_*` accendono l'osservabilità: il root trace degli agent Python e gli span OpenAI automatici per STT/LLM/TTS finiscono in Langfuse.
 - `LLM_SERVICE_*` servono agli agent Python per parlare con il servizio `.NET` locale.
-- `RUNPOD_LLM_*` servono al servizio `.NET` per parlare con Runpod.
+- `RUNPOD_LLM_*` sono le variabili “esterne” della demo: `docker compose` le mappa in `LlmService__UpstreamEndpoint`, `LlmService__ApiKey` e `LlmService__DefaultModel` per il servizio `.NET`.
 - `LIVEKIT_SIP_OUTBOUND_TRUNK` e `SIP_OUTBOUND_TARGET` servono solo per il flusso outbound.
 - LM Studio non è più parte di questo stack.
 
