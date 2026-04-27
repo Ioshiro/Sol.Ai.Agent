@@ -24,13 +24,13 @@ async def check_openai(config: AppConfig) -> None:
 
 async def check_llm_service(config: AppConfig) -> None:
     if not config.llm_service_base_url:
-        raise ValueError("LlmService__UpstreamEndpoint is required.")
+        raise ValueError("LLM_SERVICE_BASE_URL is required.")
 
     if not config.llm_service_api_key:
-        raise ValueError("LlmService__ApiKey is required.")
+        raise ValueError("LLM_SERVICE_API_KEY is required.")
 
     if not config.llm_service_model:
-        raise ValueError("LlmService__DefaultModel is required.")
+        raise ValueError("LLM_SERVICE_MODEL is required.")
 
     # Runpod/OpenAI-compatible endpoints do not consistently expose /models, so
     # we only validate configuration here and let the first chat completion call

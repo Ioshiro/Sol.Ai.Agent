@@ -36,9 +36,12 @@ cp .env.example .env
 Compila almeno questi valori:
 
 - `OPENAI_API_KEY`
-- `LlmService__UpstreamEndpoint`
-- `LlmService__ApiKey`
-- `LlmService__DefaultModel`
+- `LLM_SERVICE_BASE_URL`
+- `LLM_SERVICE_API_KEY`
+- `LLM_SERVICE_MODEL`
+- `RUNPOD_LLM_BASE_URL`
+- `RUNPOD_LLM_API_KEY`
+- `RUNPOD_LLM_MODEL`
 
 ## Installare `uv`
 
@@ -99,9 +102,12 @@ OPENAI_API_KEY=...
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TTS_VOICE=alloy
-LlmService__UpstreamEndpoint=https://your-runpod-endpoint/v1
-LlmService__ApiKey=...
-LlmService__DefaultModel=qwen3.5-4b
+LLM_SERVICE_BASE_URL=http://localhost:8081/v1
+LLM_SERVICE_API_KEY=lm-studio
+LLM_SERVICE_MODEL=qwen3.5-4b
+RUNPOD_LLM_BASE_URL=https://your-runpod-endpoint/v1
+RUNPOD_LLM_API_KEY=...
+RUNPOD_LLM_MODEL=qwen3.5-4b
 ```
 
 ## Note sul servizio `.NET`
@@ -112,6 +118,8 @@ Per avviare tutto dal repository basta `docker compose up --build`.
 ## Note operative
 
 - `agent.py` e `agent_SIP.py` restano esterni al compose per via del microfono/speaker dell'host e dei flussi di esecuzione interattivi.
+- `LLM_SERVICE_*` servono agli agent Python per parlare con il servizio `.NET` locale.
+- `RUNPOD_LLM_*` servono al servizio `.NET` per parlare con Runpod.
 - `LIVEKIT_SIP_OUTBOUND_TRUNK` e `SIP_OUTBOUND_TARGET` servono solo per il flusso outbound.
 - LM Studio non è più parte di questo stack.
 
@@ -119,4 +127,4 @@ Per avviare tutto dal repository basta `docker compose up --build`.
 
 - Se `llm-service` non risponde, controlla `docker compose logs llm-service`.
 - Se `lk-bootstrap` fallisce, controlla `docker compose logs lk-bootstrap`.
-- Se il worker non parte, verifica le credenziali OpenAI e Runpod nel `.env`.
+- Se il worker non parte, verifica `OPENAI_*`, `LLM_SERVICE_*` e `RUNPOD_LLM_*` nel `.env`.
