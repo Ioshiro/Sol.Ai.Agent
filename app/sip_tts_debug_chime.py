@@ -7,12 +7,15 @@ Markers (same env enables both):
 
 - **Final STT transcript**: two short beeps (~700 Hz) on ``user_input_transcribed``
   with ``is_final=True`` (testo finale dal riconoscimento).
-- **Agent voice playout**: single higher beep (~1.2 kHz) on ``playback_started``
-  for ``session.output.audio`` — primo frame verso la room dopo LLM+TTS.
+- **LLM reply pipeline / streaming**: single higher beep (~1.2 kHz) when the session
+  enters ``agent_state_changed`` with ``new_state="thinking"``. In LiveKit Agents
+  questo avviene nel ``_pipeline_reply_task_impl`` subito prima di leggere e
+  inoltrare lo stream testuale dell'LLM (dopo scheduling/autorizzazioni del turno),
+  quindi **prima** del playout audio e più vicino all’“inizio lavoro risposta LLM”
+  rispetto a ``playback_started`` o ``speech_created``.
 
-  Nota: **non** usare ``speech_created`` per il TTS: con preemptive generation
-  LiveKit emette ``speech_created`` subito dopo il transcript finale, quasi nello
-  stesso istante dell'evento STT, non quando parte l'audio sintetizzato.
+  Limite: con preemptive generation il task LLM può aver già iniziato a riempire
+  il canale testo poco prima; non esiste un evento pubblico sul **primo token**.
 
 Enable with env ``SIP_TTS_DEBUG_CHIME=1`` (also ``true`` / ``yes`` / ``on``).
 """
@@ -93,7 +96,7 @@ async def _silence_frames(duration_s: float) -> AsyncIterator[rtc.AudioFrame]:
 
 
 async def _short_tone_frames() -> AsyncIterator[rtc.AudioFrame]:
-    """~70 ms @ 1.2 kHz — TTS / ``speech_created``."""
+    """~70 ms @ 1.2 kHz — marker fase risposta LLM (stato *thinking*)."""
     async for frame in _sine_burst_frames(freq_hz=1200.0, duration_s=0.07):
         yield frame
 
@@ -108,8 +111,8 @@ async def _stt_final_llm_marker_frames() -> AsyncIterator[rtc.AudioFrame]:
         yield frame
 
 
-def tts_debug_chime_audio_config() -> AudioConfig:
-    """Fresh async iterator per ``play()`` call (TTS phase)."""
+def llm_stream_debug_chime_audio_config() -> AudioConfig:
+    """Fresh async iterator per ``play()`` (ingresso in *thinking* / pipeline risposta LLM)."""
     return AudioConfig(_short_tone_frames(), volume=1.0)
 
 

@@ -32,10 +32,10 @@ from app.observability import (
 )
 from app.runtime_checks import check_llm_service, check_openai
 from app.sip_tts_debug_chime import (
+    llm_stream_debug_chime_audio_config,
     sip_tts_debug_chime_enabled,
     start_debug_chime_player,
     stt_llm_debug_chime_audio_config,
-    tts_debug_chime_audio_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"),
                 user_id=caller.identity,
             )
-            playback_chime_last_at: list[float] = [0.0]  # time.monotonic(); debounce flush boundaries
+            thinking_chime_last_at: list[float] = [0.0]  # debounce tool-loop speaking→thinking
 
             @session.on("close")
             def _on_session_closed(event) -> None:
@@ -143,6 +143,22 @@ async def entrypoint(ctx: JobContext) -> None:
             @session.on("user_state_changed")
             def _on_user_state_changed(event) -> None:
                 recorder.on_user_state_changed(event)
+
+            @session.on("agent_state_changed")
+            def _on_agent_state_changed(event) -> None:
+                if sip_debug_chime is None:
+                    return
+                old_state = getattr(event, "old_state", None) or getattr(event, "oldState", None)
+                new_state = getattr(event, "new_state", None) or getattr(event, "newState", None)
+                if new_state != "thinking":
+                    return
+                if old_state == "initializing":
+                    return
+                now = time.monotonic()
+                if now - thinking_chime_last_at[0] < 0.18:
+                    return
+                thinking_chime_last_at[0] = now
+                sip_debug_chime.play(llm_stream_debug_chime_audio_config())
 
             @session.on("user_input_transcribed")
             def _on_user_input_transcribed(event) -> None:
@@ -171,21 +187,14 @@ async def entrypoint(ctx: JobContext) -> None:
                 @session.output.audio.on("playback_started")
                 def _on_playback_started(event) -> None:
                     recorder.on_playback_started(event)
-                    if sip_debug_chime is None:
-                        return
-                    now = time.monotonic()
-                    if now - playback_chime_last_at[0] < 0.22:
-                        return
-                    playback_chime_last_at[0] = now
-                    sip_debug_chime.play(tts_debug_chime_audio_config())
 
             asyncio.create_task(_attach_tts_start_logger())
 
             if sip_tts_debug_chime_enabled():
                 sip_debug_chime = await start_debug_chime_player(room=ctx.room)
                 logger.info(
-                    "SIP voice debug chimes → phone: double beep on final STT transcript; "
-                    "high tone when agent voice playback starts (post LLM/TTS)"
+                    "SIP voice debug chimes → phone: double beep on final STT; "
+                    "high tone when agent enters thinking (LLM reply pipeline / text stream forward)"
                 )
 
             await session.start(
