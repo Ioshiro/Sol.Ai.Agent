@@ -89,8 +89,8 @@ class VoiceTraceRecorderTests(unittest.TestCase):
 
         llm = next(child for child in turn.children if child.name == "llm.generate.turn.1")
         self.assertTrue(llm.ended)
-        self.assertEqual(llm.updates, [])
-
+        self.assertEqual(llm.updates[-1]["output"]["assistant_text"], None)
+        self.assertAlmostEqual(llm.updates[-1]["output"]["duration_ms"], 100.0)
         root_output = root.updates[-1]["output"]
         self.assertEqual(root_output["turn_count"], 1)
         self.assertEqual(root_output["turns"][0]["assistant_text"], "Certo, dimmi pure.")
@@ -98,6 +98,41 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         self.assertAlmostEqual(root_output["turns"][0]["tts_duration_ms"], 2900.0)
         self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 4.0)
         self.assertEqual(root_output["close_reason"], "done")
+
+
+    def test_assistant_commit_is_assigned_to_original_turn(self) -> None:
+        root = FakeObservation(name="root", as_type="span")
+        recorder = VoiceTraceRecorder(
+            enabled=True,
+            root_span=root,
+            trace_name="trace",
+            session_id="session-1",
+            call_kind="sip",
+            agent_name="agent",
+            user_id="user-1",
+        )
+
+        recorder.begin_turn(started_at=1.0, source="user_state_changed")
+        recorder.on_user_input_transcribed(
+            SimpleNamespace(is_final=True, transcript="Pronto", language="it", created_at=2.0)
+        )
+        recorder.on_speech_created(SimpleNamespace(created_at=2.1))
+
+        recorder.begin_turn(started_at=5.0, source="user_state_changed")
+        recorder.on_conversation_item_added(
+            SimpleNamespace(
+                item=SimpleNamespace(role="assistant", text_content="Certo, dimmi pure.", content=["Certo, dimmi pure."]),
+                created_at=6.0,
+            )
+        )
+        recorder.on_playback_started(SimpleNamespace(created_at=6.5))
+        recorder.finalize(output={"close_reason": "done"})
+
+        root_output = root.updates[-1]["output"]
+        self.assertEqual(root_output["turn_count"], 2)
+        self.assertEqual(root_output["turns"][0]["assistant_text"], "Certo, dimmi pure.")
+        self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 6.0)
+        self.assertEqual(root_output["turns"][1]["assistant_text"], None)
 
 
 if __name__ == "__main__":
