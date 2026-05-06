@@ -33,6 +33,7 @@ from app.runtime_checks import check_llm_service, check_openai
 from app.sip_tts_debug_chime import (
     sip_tts_debug_chime_enabled,
     start_debug_chime_player,
+    stt_llm_debug_chime_audio_config,
     tts_debug_chime_audio_config,
 )
 
@@ -144,6 +145,11 @@ async def entrypoint(ctx: JobContext) -> None:
             @session.on("user_input_transcribed")
             def _on_user_input_transcribed(event) -> None:
                 recorder.on_user_input_transcribed(event)
+                if sip_debug_chime is None:
+                    return
+                is_final = bool(getattr(event, "is_final", False) or getattr(event, "isFinal", False))
+                if is_final:
+                    sip_debug_chime.play(stt_llm_debug_chime_audio_config())
 
             @session.on("speech_created")
             def _on_speech_created(event) -> None:
@@ -178,7 +184,10 @@ async def entrypoint(ctx: JobContext) -> None:
             )
             if sip_tts_debug_chime_enabled():
                 sip_debug_chime = await start_debug_chime_player(room=ctx.room)
-                logger.info("SIP TTS debug chime enabled (short tone on speech_created → phone)")
+                logger.info(
+                    "SIP voice debug chimes enabled → phone: double beep on final STT (LLM start), "
+                    "high tone on speech_created (TTS start)"
+                )
             session.say("Buongiorno, come posso aiutarti?")
 
             await close_event.wait()
