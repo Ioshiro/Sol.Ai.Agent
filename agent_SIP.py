@@ -177,6 +177,10 @@ async def entrypoint(ctx: JobContext) -> None:
             def _on_conversation_item_added(event) -> None:
                 recorder.on_conversation_item_added(event)
 
+            @session.on("metrics_collected")
+            def _on_session_metrics_collected(event) -> None:
+                recorder.on_session_metrics_collected(event)
+
             @session.llm.on("metrics_collected")
             def _on_llm_metrics_collected(metrics) -> None:
                 recorder.on_llm_metrics_collected(metrics)

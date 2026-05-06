@@ -68,6 +68,18 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         recorder.on_user_input_transcribed(
             SimpleNamespace(is_final=True, transcript="Pronto", language="it", created_at=2.0)
         )
+        recorder.on_session_metrics_collected(
+            SimpleNamespace(
+                metrics=SimpleNamespace(
+                    type="eou_metrics",
+                    timestamp=2.05,
+                    end_of_utterance_delay=0.05,
+                    transcription_delay=0.1,
+                    on_user_turn_completed_delay=0.02,
+                    speech_id="sid-1",
+                )
+            )
+        )
         recorder.on_llm_metrics_collected(
             SimpleNamespace(duration=1.5, timestamp=3.0, ttft=1.1, request_id="r1")
         )
@@ -93,6 +105,7 @@ class VoiceTraceRecorderTests(unittest.TestCase):
 
         llm = next(child for child in turn.children if child.name == "llm.generate.turn.1")
         self.assertTrue(llm.ended)
+        self.assertEqual(llm.metadata.get("llm_trace_source"), "eou_metrics")
         self.assertEqual(llm.updates[-1]["output"]["assistant_text"], "Certo, dimmi pure.")
         self.assertAlmostEqual(llm.updates[-1]["output"]["duration_ms"], 1500.0)
         self.assertEqual(llm.end_time, 3000000000)
@@ -109,6 +122,8 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         self.assertAlmostEqual(root_output["turns"][0]["llm_duration_ms"], 1500.0)
         self.assertAlmostEqual(root_output["turns"][0]["tts_duration_ms"], 2900.0)
         self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 4.0)
+        self.assertAlmostEqual(root_output["turns"][0]["eou_transcription_delay_ms"], 100.0)
+        self.assertAlmostEqual(root_output["turns"][0]["eou_end_of_utterance_delay_ms"], 50.0)
         self.assertEqual(root_output["close_reason"], "done")
 
     def test_assistant_commit_is_assigned_to_original_turn(self) -> None:

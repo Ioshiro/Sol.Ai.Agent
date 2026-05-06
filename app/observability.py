@@ -16,6 +16,10 @@ class CallTurnMetrics:
     turn_index: int
     stt_started_at: float | None = None
     transcript_final_at: float | None = None
+    eou_timestamp: float | None = None
+    eou_end_of_utterance_delay_ms: float | None = None
+    eou_transcription_delay_ms: float | None = None
+    eou_on_user_turn_completed_delay_ms: float | None = None
     llm_completed_at: float | None = None
     llm_metrics_duration_ms: float | None = None
     speech_created_at: float | None = None
@@ -43,7 +47,7 @@ class CallTurnMetrics:
         return max(0.0, (self.playback_started_at - self.speech_created_at) * 1000.0)
 
     def as_summary(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "turn_index": self.turn_index,
             "stt_duration_ms": self.stt_duration_ms(),
             "llm_duration_ms": self.llm_duration_ms(),
@@ -53,6 +57,15 @@ class CallTurnMetrics:
             "assistant_text": self.assistant_text,
             "assistant_committed_at": self.assistant_committed_at,
         }
+        if self.eou_timestamp is not None:
+            out["eou_timestamp"] = self.eou_timestamp
+        if self.eou_end_of_utterance_delay_ms is not None:
+            out["eou_end_of_utterance_delay_ms"] = self.eou_end_of_utterance_delay_ms
+        if self.eou_transcription_delay_ms is not None:
+            out["eou_transcription_delay_ms"] = self.eou_transcription_delay_ms
+        if self.eou_on_user_turn_completed_delay_ms is not None:
+            out["eou_on_user_turn_completed_delay_ms"] = self.eou_on_user_turn_completed_delay_ms
+        return out
 
 class VoiceTraceRecorder:
     def __init__(
@@ -233,17 +246,24 @@ class VoiceTraceRecorder:
 
         self._stt_obs = self._close_obs(self._stt_obs)
         if self.current_turn is not None and self._turn_obs is not None:
-            self._turn_obs.update(
-                output={
-                    "turn_index": self.current_turn.turn_index,
-                    "stt_duration_ms": self.current_turn.stt_duration_ms(),
-                    "llm_duration_ms": self.current_turn.llm_duration_ms(),
-                    "tts_duration_ms": self.current_turn.tts_duration_ms(),
-                    "user_transcript": self.current_turn.user_transcript,
-                    "assistant_text": self.current_turn.assistant_text,
-                    "assistant_committed_at": self.current_turn.assistant_committed_at,
-                }
-            )
+            turn_out: dict[str, Any] = {
+                "turn_index": self.current_turn.turn_index,
+                "stt_duration_ms": self.current_turn.stt_duration_ms(),
+                "llm_duration_ms": self.current_turn.llm_duration_ms(),
+                "tts_duration_ms": self.current_turn.tts_duration_ms(),
+                "user_transcript": self.current_turn.user_transcript,
+                "assistant_text": self.current_turn.assistant_text,
+                "assistant_committed_at": self.current_turn.assistant_committed_at,
+            }
+            if self.current_turn.eou_timestamp is not None:
+                turn_out["eou_timestamp"] = self.current_turn.eou_timestamp
+            if self.current_turn.eou_end_of_utterance_delay_ms is not None:
+                turn_out["eou_end_of_utterance_delay_ms"] = self.current_turn.eou_end_of_utterance_delay_ms
+            if self.current_turn.eou_transcription_delay_ms is not None:
+                turn_out["eou_transcription_delay_ms"] = self.current_turn.eou_transcription_delay_ms
+            if self.current_turn.eou_on_user_turn_completed_delay_ms is not None:
+                turn_out["eou_on_user_turn_completed_delay_ms"] = self.current_turn.eou_on_user_turn_completed_delay_ms
+            self._turn_obs.update(output=turn_out)
             self._turn_obs.end()
             self._turn_obs = None
 
@@ -334,6 +354,26 @@ class VoiceTraceRecorder:
 
         logger.info("Langfuse turn %s STT start at %.3f", self.turn_index, started_at)
 
+    def _ensure_llm_obs_started(self, turn: CallTurnMetrics, *, source: str) -> None:
+        if self._turn_obs is None or turn.turn_index in self._llm_obs_by_turn:
+            return
+        self._llm_obs_by_turn[turn.turn_index] = self._turn_obs.start_observation(
+            name=f"llm.generate.turn.{turn.turn_index}",
+            as_type="generation",
+            model=self.llm_model,
+            input={
+                "turn_index": turn.turn_index,
+                "transcript": turn.user_transcript,
+                "language": turn.user_language,
+                "llm_trace_source": source,
+            },
+            metadata={
+                "turn_index": turn.turn_index,
+                "phase": "llm",
+                "llm_trace_source": source,
+            },
+        )
+
     def on_user_state_changed(self, event: Any) -> None:
         if not self.enabled:
             return
@@ -370,23 +410,9 @@ class VoiceTraceRecorder:
                 "transcript": transcript,
                 "language": language,
                 "duration_ms": duration_ms,
+                "note": "LLM Langfuse child opens on eou_metrics (session) or first llm_metrics fallback",
             },
         )
-        if self._turn_obs is not None:
-            self._llm_obs_by_turn[self.current_turn.turn_index] = self._turn_obs.start_observation(
-                name=f"llm.generate.turn.{self.current_turn.turn_index}",
-                as_type="generation",
-                model=self.llm_model,
-                input={
-                    "turn_index": self.current_turn.turn_index,
-                    "transcript": transcript,
-                    "language": language,
-                },
-                metadata={
-                    "turn_index": self.current_turn.turn_index,
-                    "phase": "llm",
-                },
-            )
 
         logger.info(
             "Langfuse turn %s STT final %.1fms transcript='%s'",
@@ -395,9 +421,52 @@ class VoiceTraceRecorder:
             transcript,
         )
 
+    def on_session_metrics_collected(self, event: Any) -> None:
+        """LiveKit ``AgentSession`` emits ``EOUMetrics`` here — commit turn / endpointing delays."""
+        if not self.enabled or self.current_turn is None:
+            return
+
+        metrics = self._event_value(event, "metrics")
+        if metrics is None:
+            return
+
+        mtype = self._event_value(metrics, "type")
+        if mtype != "eou_metrics":
+            return
+
+        turn = self.current_turn
+        if turn.eou_timestamp is not None:
+            return
+
+        ts = self._event_value(metrics, "timestamp")
+        if ts is not None:
+            turn.eou_timestamp = float(ts)
+
+        eou = self._event_value(metrics, "end_of_utterance_delay")
+        if eou is not None:
+            turn.eou_end_of_utterance_delay_ms = float(eou) * 1000.0
+        td = self._event_value(metrics, "transcription_delay")
+        if td is not None:
+            turn.eou_transcription_delay_ms = float(td) * 1000.0
+        ouc = self._event_value(metrics, "on_user_turn_completed_delay")
+        if ouc is not None:
+            turn.eou_on_user_turn_completed_delay_ms = float(ouc) * 1000.0
+
+        self._ensure_llm_obs_started(turn, source="eou_metrics")
+
+        logger.info(
+            "Langfuse turn %s EOU delays eou=%.1fms transcript=%.1fms on_user_turn_completed=%.1fms",
+            turn.turn_index,
+            turn.eou_end_of_utterance_delay_ms if turn.eou_end_of_utterance_delay_ms is not None else -1.0,
+            turn.eou_transcription_delay_ms if turn.eou_transcription_delay_ms is not None else -1.0,
+            turn.eou_on_user_turn_completed_delay_ms if turn.eou_on_user_turn_completed_delay_ms is not None else -1.0,
+        )
+
     def on_llm_metrics_collected(self, event: Any) -> None:
         if not self.enabled or self.current_turn is None:
             return
+
+        self._ensure_llm_obs_started(self.current_turn, source="llm_metrics_fallback")
 
         duration = self._event_value(event, "duration")
         timestamp = self._event_value(event, "timestamp")
