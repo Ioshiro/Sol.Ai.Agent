@@ -9,7 +9,7 @@
     "roomConfig": {
       "agents": [
         {
-          "agentName": "local-sip-agent"
+          "agentName": "solai-sip-agent"
         }
       ]
     }

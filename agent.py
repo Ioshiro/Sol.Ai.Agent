@@ -39,7 +39,7 @@ async def entrypoint(ctx: JobContext) -> None:
     config = AppConfig.load()
     configure_logging(config.log_level)
 
-    langfuse = configure_langfuse_tracing(agent_name="local-console-agent")
+    langfuse = configure_langfuse_tracing(agent_name="solai-console-agent")
     trace_name = f"console-voice-session-{ctx.room.name}"
     root_input = {
         "mode": "console",
@@ -54,7 +54,7 @@ async def entrypoint(ctx: JobContext) -> None:
         trace_name=trace_name,
         session_id=ctx.room.name,
         call_kind="console",
-        agent_name="local-console-agent",
+        agent_name="solai-console-agent",
         user_id=None,
         input_payload=root_input,
     )
@@ -92,7 +92,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 trace_name=trace_name,
                 session_id=ctx.room.name,
                 call_kind="console",
-                agent_name="local-console-agent",
+                agent_name="solai-console-agent",
                 user_id=None,
             )
 

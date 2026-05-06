@@ -51,7 +51,7 @@ def prewarm(proc: JobProcess) -> None:
 async def entrypoint(ctx: JobContext) -> None:
     config = AppConfig.load()
     configure_logging(config.log_level)
-    langfuse = configure_langfuse_tracing(agent_name=os.getenv("LIVEKIT_AGENT_NAME", "local-sip-agent"))
+    langfuse = configure_langfuse_tracing(agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"))
 
     await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
     caller = await _ensure_sip_participant(ctx)
@@ -78,7 +78,7 @@ async def entrypoint(ctx: JobContext) -> None:
         trace_name=trace_name,
         session_id=ctx.room.name,
         call_kind="sip",
-        agent_name=os.getenv("LIVEKIT_AGENT_NAME", "local-sip-agent"),
+        agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"),
         user_id=caller.identity,
         input_payload=root_input,
     )
@@ -116,7 +116,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 trace_name=trace_name,
                 session_id=ctx.room.name,
                 call_kind="sip",
-                agent_name=os.getenv("LIVEKIT_AGENT_NAME", "local-sip-agent"),
+                agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"),
                 user_id=caller.identity,
             )
 
@@ -200,7 +200,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "local-sip-agent"),
+            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"),
             ws_url="ws://localhost:7880",
             api_key="devkey",
             api_secret="secret",
