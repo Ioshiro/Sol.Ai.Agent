@@ -82,9 +82,10 @@ def _delete_existing(*, resource: str, label: str) -> None:
             print(f"Could not list {label}s (exit {result.returncode}), skipping delete.", flush=True)
             return
 
-        # Try JSON parsing first (some LK CLI versions support structured output)
-        ids: list[str] = []
         stripped = result.stdout.strip()
+        ids: list[str] = []
+
+        # Try JSON first
         if stripped.startswith("[") or stripped.startswith("{"):
             import json
             try:
@@ -104,13 +105,28 @@ def _delete_existing(*, resource: str, label: str) -> None:
             except json.JSONDecodeError:
                 pass
 
-        # If no IDs found via JSON, scan output lines for UUIDs
+        # Fallback: parse table output (│ col1 │ col2 │ … │) or scan for known prefix IDs
         if not ids:
-            import re
-            ids = re.findall(
-                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-                stripped,
-            )
+            for line in stripped.splitlines():
+                line = line.strip()
+                if not line.startswith("│") or "─" in line:
+                    continue
+                parts = [col.strip() for col in line.split("│") if col.strip()]
+                if parts:
+                    first_cell = parts[0]
+                    if first_cell and not any(
+                        keyword.lower() in first_cell.lower()
+                        for keyword in ("id", "trunk", "dispatch", "name", "number", "sip")
+                    ):
+                        ids.append(first_cell)
+            if not ids:
+                # Last resort: scan for LiveKit ID patterns (ST_..., SDR_..., UUIDs)
+                import re
+                ids = re.findall(
+                    r"[A-Z]{2,5}_[A-Za-z0-9]{8,}"
+                    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                    stripped,
+                )
 
         for resource_id in ids:
             print(f"Deleting existing {label} {resource_id}...", flush=True)
