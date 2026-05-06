@@ -5,9 +5,14 @@ Uses LiveKit ``BackgroundAudioPlayer`` so audio is published to the room
 
 Markers (same env enables both):
 
-- **STT → LLM**: two short beeps (~700 Hz) when ``user_input_transcribed`` is
-  final (transcript committed, LLM request starts).
-- **TTS start**: single higher beep (~1.2 kHz) on ``speech_created``.
+- **Final STT transcript**: two short beeps (~700 Hz) on ``user_input_transcribed``
+  with ``is_final=True`` (testo finale dal riconoscimento).
+- **Agent voice playout**: single higher beep (~1.2 kHz) on ``playback_started``
+  for ``session.output.audio`` — primo frame verso la room dopo LLM+TTS.
+
+  Nota: **non** usare ``speech_created`` per il TTS: con preemptive generation
+  LiveKit emette ``speech_created`` subito dopo il transcript finale, quasi nello
+  stesso istante dell'evento STT, non quando parte l'audio sintetizzato.
 
 Enable with env ``SIP_TTS_DEBUG_CHIME=1`` (also ``true`` / ``yes`` / ``on``).
 """

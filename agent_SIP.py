@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import nullcontext
 
 from livekit import rtc
@@ -131,6 +132,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 agent_name=os.getenv("LIVEKIT_AGENT_NAME", "solai-sip-agent"),
                 user_id=caller.identity,
             )
+            playback_chime_last_at: list[float] = [0.0]  # time.monotonic(); debounce flush boundaries
 
             @session.on("close")
             def _on_session_closed(event) -> None:
@@ -154,8 +156,6 @@ async def entrypoint(ctx: JobContext) -> None:
             @session.on("speech_created")
             def _on_speech_created(event) -> None:
                 recorder.on_speech_created(event)
-                if sip_debug_chime is not None:
-                    sip_debug_chime.play(tts_debug_chime_audio_config())
 
             @session.on("conversation_item_added")
             def _on_conversation_item_added(event) -> None:
@@ -171,8 +171,22 @@ async def entrypoint(ctx: JobContext) -> None:
                 @session.output.audio.on("playback_started")
                 def _on_playback_started(event) -> None:
                     recorder.on_playback_started(event)
+                    if sip_debug_chime is None:
+                        return
+                    now = time.monotonic()
+                    if now - playback_chime_last_at[0] < 0.22:
+                        return
+                    playback_chime_last_at[0] = now
+                    sip_debug_chime.play(tts_debug_chime_audio_config())
 
             asyncio.create_task(_attach_tts_start_logger())
+
+            if sip_tts_debug_chime_enabled():
+                sip_debug_chime = await start_debug_chime_player(room=ctx.room)
+                logger.info(
+                    "SIP voice debug chimes → phone: double beep on final STT transcript; "
+                    "high tone when agent voice playback starts (post LLM/TTS)"
+                )
 
             await session.start(
                 agent=LocalSipAssistant(),
@@ -182,12 +196,6 @@ async def entrypoint(ctx: JobContext) -> None:
                     close_on_disconnect=True,
                 ),
             )
-            if sip_tts_debug_chime_enabled():
-                sip_debug_chime = await start_debug_chime_player(room=ctx.room)
-                logger.info(
-                    "SIP voice debug chimes enabled → phone: double beep on final STT (LLM start), "
-                    "high tone on speech_created (TTS start)"
-                )
             session.say("Buongiorno, come posso aiutarti?")
 
             await close_event.wait()
