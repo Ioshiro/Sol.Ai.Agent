@@ -89,14 +89,14 @@ class VoiceTraceRecorderTests(unittest.TestCase):
 
         llm = next(child for child in turn.children if child.name == "llm.generate.turn.1")
         self.assertTrue(llm.ended)
-        self.assertEqual(llm.updates[-1]["output"]["assistant_text"], "Certo, dimmi pure.")
-        self.assertAlmostEqual(llm.updates[-1]["output"]["duration_ms"], 2000.0)
+        self.assertEqual(llm.updates, [])
 
         root_output = root.updates[-1]["output"]
         self.assertEqual(root_output["turn_count"], 1)
         self.assertEqual(root_output["turns"][0]["assistant_text"], "Certo, dimmi pure.")
-        self.assertAlmostEqual(root_output["turns"][0]["llm_duration_ms"], 2000.0)
+        self.assertAlmostEqual(root_output["turns"][0]["llm_duration_ms"], 100.0)
         self.assertAlmostEqual(root_output["turns"][0]["tts_duration_ms"], 2900.0)
+        self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 4.0)
         self.assertEqual(root_output["close_reason"], "done")
 
 

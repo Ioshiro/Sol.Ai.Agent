@@ -29,12 +29,9 @@ class CallTurnMetrics:
         return max(0.0, (self.transcript_final_at - self.stt_started_at) * 1000.0)
 
     def llm_duration_ms(self) -> float | None:
-        if self.transcript_final_at is None:
+        if self.transcript_final_at is None or self.speech_created_at is None:
             return None
-        end_at = self.assistant_committed_at if self.assistant_committed_at is not None else self.speech_created_at
-        if end_at is None:
-            return None
-        return max(0.0, (end_at - self.transcript_final_at) * 1000.0)
+        return max(0.0, (self.speech_created_at - self.transcript_final_at) * 1000.0)
 
     def tts_duration_ms(self) -> float | None:
         if self.speech_created_at is None or self.playback_started_at is None:
@@ -265,31 +262,6 @@ class VoiceTraceRecorder:
 
         if assistant_text is not None:
             self.current_turn.assistant_text = assistant_text
-
-        if self._llm_obs is not None:
-            self._llm_obs = self._close_obs(
-                self._llm_obs,
-                output={
-                    "turn_index": self.current_turn.turn_index,
-                    "assistant_text": self.current_turn.assistant_text,
-                    "duration_ms": self.current_turn.llm_duration_ms(),
-                },
-            )
-
-        if self._tts_obs is not None and assistant_text is not None:
-            self._tts_obs.update(
-                input={
-                    "turn_index": self.current_turn.turn_index,
-                    "assistant_text": self.current_turn.assistant_text,
-                }
-            )
-
-        logger.info(
-            "Langfuse turn %s LLM completed at %.3f text='%s'",
-            self.current_turn.turn_index,
-            float(created_at) if created_at is not None else time.perf_counter(),
-            self.current_turn.assistant_text or "",
-        )
 
         self._append_turn_summary()
     def on_speech_created(self, event: Any) -> None:
