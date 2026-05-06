@@ -149,6 +149,73 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         self.assertEqual(root_output["turns"][1]["assistant_text"], None)
 
 
+    def test_late_assistant_commit_stays_on_original_turn(self) -> None:
+        root = FakeObservation(name="root", as_type="span")
+        recorder = VoiceTraceRecorder(
+            enabled=True,
+            root_span=root,
+            trace_name="trace",
+            session_id="session-1",
+            call_kind="sip",
+            agent_name="agent",
+            user_id="user-1",
+        )
+
+        recorder.begin_turn(started_at=1.0, source="user_state_changed")
+        recorder.on_user_input_transcribed(
+            SimpleNamespace(is_final=True, transcript="Uno", language="it", created_at=1.1)
+        )
+        recorder.on_llm_metrics_collected(
+            SimpleNamespace(duration=1.0, timestamp=2.0, ttft=0.8, request_id="r1")
+        )
+        recorder.on_speech_created(SimpleNamespace(created_at=1.5))
+        recorder.on_conversation_item_added(
+            SimpleNamespace(
+                item=SimpleNamespace(role="assistant", text_content="Risposta uno", content=["Risposta uno"]),
+                created_at=1.6,
+            )
+        )
+        recorder.on_playback_started(SimpleNamespace(created_at=1.8))
+
+        recorder.begin_turn(started_at=3.0, source="user_state_changed")
+        recorder.on_user_input_transcribed(
+            SimpleNamespace(is_final=True, transcript="Due", language="it", created_at=3.1)
+        )
+        recorder.on_llm_metrics_collected(
+            SimpleNamespace(duration=1.2, timestamp=4.0, ttft=0.9, request_id="r2")
+        )
+        recorder.on_speech_created(SimpleNamespace(created_at=3.2))
+        recorder.on_playback_started(SimpleNamespace(created_at=3.4))
+
+        recorder.begin_turn(started_at=4.5, source="user_state_changed")
+        recorder.on_user_input_transcribed(
+            SimpleNamespace(is_final=True, transcript="Tre", language="it", created_at=4.6)
+        )
+        recorder.on_speech_created(SimpleNamespace(created_at=5.0))
+        recorder.on_conversation_item_added(
+            SimpleNamespace(
+                item=SimpleNamespace(role="assistant", text_content="Risposta due", content=["Risposta due"]),
+                created_at=4.2,
+            )
+        )
+        recorder.finalize(output={"close_reason": "done"})
+
+        root_output = root.updates[-1]["output"]
+        self.assertEqual(root_output["turn_count"], 3)
+        self.assertEqual(root_output["turns"][1]["assistant_text"], "Risposta due")
+        self.assertEqual(root_output["turns"][1]["assistant_committed_at"], 4.2)
+
+        turn2 = next(child for child in root.children if child.name == "voice.turn.2")
+        llm = next(child for child in turn2.children if child.name == "llm.generate.turn.2")
+        self.assertTrue(llm.ended)
+        self.assertEqual(llm.updates[-1]["output"]["turn_index"], 2)
+        self.assertEqual(llm.updates[-1]["output"]["assistant_text"], "Risposta due")
+        self.assertEqual(llm.end_time, 4000000000)
+
+        tts = next(child for child in turn2.children if child.name == "tts.synthesize.turn.2")
+        self.assertEqual(tts.updates[-1]["input"]["assistant_text"], "Risposta due")
+
+
 
 if __name__ == "__main__":
     unittest.main()

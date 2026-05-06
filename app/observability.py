@@ -84,10 +84,10 @@ class VoiceTraceRecorder:
         self._turn_summaries: list[dict[str, Any]] = []
         self._turn_obs: Any | None = None
         self._stt_obs: Any | None = None
-        self._tts_obs: Any | None = None
-        self._llm_obs: Any | None = None
         self._turn_by_index: dict[int, CallTurnMetrics] = {}
         self._assistant_turn_index: int | None = None
+        self._llm_obs_by_turn: dict[int, Any] = {}
+        self._tts_obs_by_turn: dict[int, Any] = {}
 
     def _event_value(self, event: Any, *names: str) -> Any:
         for name in names:
@@ -120,6 +120,20 @@ class VoiceTraceRecorder:
             return None
         return self._turn_by_index.get(turn_index)
 
+    def _turn_for_assistant_event(self, created_at: float | None = None) -> CallTurnMetrics | None:
+        if created_at is not None:
+            candidate: CallTurnMetrics | None = None
+            for turn_index in sorted(self._turn_by_index):
+                turn = self._turn_by_index[turn_index]
+                if turn.speech_created_at is None:
+                    continue
+                if turn.speech_created_at <= created_at:
+                    candidate = turn
+            if candidate is not None:
+                return candidate
+
+        return self._turn_for_index(self._assistant_turn_index) or self.current_turn
+
     def _append_turn_summary(self, turn: CallTurnMetrics | None = None) -> None:
         target_turn = turn if turn is not None else self.current_turn
         if target_turn is None:
@@ -151,17 +165,32 @@ class VoiceTraceRecorder:
             obs.end(end_time=int(end_at_seconds * 1_000_000_000))
         return None
 
+    def _close_turn_obs(
+        self,
+        obs_by_turn: dict[int, Any],
+        turn: CallTurnMetrics | None,
+        *,
+        end_at_seconds: float | None,
+        **update_kwargs: Any,
+    ) -> Any | None:
+        if turn is None:
+            return None
+
+        obs = obs_by_turn.pop(turn.turn_index, None)
+        if obs is None:
+            return None
+        return self._close_obs_at(obs, end_at_seconds=end_at_seconds, **update_kwargs)
+
     def _maybe_finalize_llm_turn(self, turn: CallTurnMetrics | None = None) -> None:
         target_turn = turn if turn is not None else self.current_turn
-        if target_turn is None or self._llm_obs is None:
-            return
-        if target_turn.llm_completed_at is None:
+        if target_turn is None or target_turn.llm_completed_at is None:
             return
         if target_turn.assistant_text is None:
             return
 
-        self._llm_obs = self._close_obs_at(
-            self._llm_obs,
+        self._close_turn_obs(
+            self._llm_obs_by_turn,
+            target_turn,
             end_at_seconds=target_turn.llm_completed_at,
             input={
                 "turn_index": target_turn.turn_index,
@@ -177,15 +206,14 @@ class VoiceTraceRecorder:
 
     def _maybe_finalize_tts_turn(self, turn: CallTurnMetrics | None = None) -> None:
         target_turn = turn if turn is not None else self.current_turn
-        if target_turn is None or self._tts_obs is None:
-            return
-        if target_turn.playback_started_at is None:
+        if target_turn is None or target_turn.playback_started_at is None:
             return
         if target_turn.assistant_text is None:
             return
 
-        self._tts_obs = self._close_obs_at(
-            self._tts_obs,
+        self._close_turn_obs(
+            self._tts_obs_by_turn,
+            target_turn,
             end_at_seconds=target_turn.playback_started_at,
             input={
                 "turn_index": target_turn.turn_index,
@@ -197,19 +225,12 @@ class VoiceTraceRecorder:
                 "playback_started_at": target_turn.playback_started_at,
             },
         )
+
     def _close_current_turn(self) -> None:
         if self.current_turn is not None:
             self._maybe_finalize_llm_turn(self.current_turn)
             self._maybe_finalize_tts_turn(self.current_turn)
 
-        self._llm_obs = self._close_obs_at(
-            self._llm_obs,
-            end_at_seconds=self.current_turn.llm_completed_at if self.current_turn is not None else None,
-        )
-        self._tts_obs = self._close_obs_at(
-            self._tts_obs,
-            end_at_seconds=self.current_turn.playback_started_at if self.current_turn is not None else None,
-        )
         self._stt_obs = self._close_obs(self._stt_obs)
         if self.current_turn is not None and self._turn_obs is not None:
             self._turn_obs.update(
@@ -226,6 +247,47 @@ class VoiceTraceRecorder:
             self._turn_obs.end()
             self._turn_obs = None
 
+    def _finalize_remaining_turn_obs(self) -> None:
+        for turn_index in sorted(list(self._llm_obs_by_turn)):
+            turn = self._turn_for_index(turn_index)
+            if turn is None:
+                self._llm_obs_by_turn.pop(turn_index, None)
+                continue
+            self._close_turn_obs(
+                self._llm_obs_by_turn,
+                turn,
+                end_at_seconds=turn.llm_completed_at,
+                input={
+                    "turn_index": turn.turn_index,
+                    "transcript": turn.user_transcript,
+                    "language": turn.user_language,
+                },
+                output={
+                    "turn_index": turn.turn_index,
+                    "assistant_text": turn.assistant_text,
+                    "duration_ms": turn.llm_duration_ms(),
+                },
+            )
+
+        for turn_index in sorted(list(self._tts_obs_by_turn)):
+            turn = self._turn_for_index(turn_index)
+            if turn is None:
+                self._tts_obs_by_turn.pop(turn_index, None)
+                continue
+            self._close_turn_obs(
+                self._tts_obs_by_turn,
+                turn,
+                end_at_seconds=turn.playback_started_at,
+                input={
+                    "turn_index": turn.turn_index,
+                    "assistant_text": turn.assistant_text,
+                },
+                output={
+                    "turn_index": turn.turn_index,
+                    "duration_ms": turn.tts_duration_ms(),
+                    "playback_started_at": turn.playback_started_at,
+                },
+            )
     def begin_turn(self, *, started_at: float, source: str) -> None:
         if not self.enabled:
             return
@@ -310,8 +372,8 @@ class VoiceTraceRecorder:
                 "duration_ms": duration_ms,
             },
         )
-        if self._turn_obs is not None and self._llm_obs is None:
-            self._llm_obs = self._turn_obs.start_observation(
+        if self._turn_obs is not None:
+            self._llm_obs_by_turn[self.current_turn.turn_index] = self._turn_obs.start_observation(
                 name=f"llm.generate.turn.{self.current_turn.turn_index}",
                 as_type="generation",
                 model=self.llm_model,
@@ -363,12 +425,12 @@ class VoiceTraceRecorder:
         if role not in {"assistant", "agent"}:
             return
 
-        target_turn = self._turn_for_index(self._assistant_turn_index) or self.current_turn
+        created_at = self._event_value(event, "created_at", "createdAt")
+        target_turn = self._turn_for_assistant_event(created_at)
         if target_turn is None:
             return
 
         assistant_text = self._message_text(item)
-        created_at = self._event_value(event, "created_at", "createdAt")
         if created_at is not None:
             target_turn.assistant_committed_at = float(created_at)
 
@@ -396,7 +458,7 @@ class VoiceTraceRecorder:
             self.current_turn.assistant_text = str(assistant_text)
 
         if self._turn_obs is not None:
-            self._tts_obs = self._turn_obs.start_observation(
+            self._tts_obs_by_turn[self.current_turn.turn_index] = self._turn_obs.start_observation(
                 name=f"tts.synthesize.turn.{self.current_turn.turn_index}",
                 as_type="generation",
                 model=self.tts_model,
@@ -420,14 +482,13 @@ class VoiceTraceRecorder:
         if not self.enabled:
             return
 
-        target_turn = self._turn_for_index(self._assistant_turn_index) or self.current_turn
+        created_at = self._event_value(event, "created_at", "createdAt")
+        target_turn = self._turn_for_assistant_event(created_at)
         if target_turn is None:
             return
 
-        created_at = self._event_value(event, "created_at", "createdAt")
         if created_at is not None:
             target_turn.playback_started_at = float(created_at)
-
         self._maybe_finalize_tts_turn(target_turn)
 
         logger.info(
@@ -443,6 +504,7 @@ class VoiceTraceRecorder:
             return
 
         self._close_current_turn()
+        self._finalize_remaining_turn_obs()
         if self.current_turn is not None:
             self._append_turn_summary()
 
