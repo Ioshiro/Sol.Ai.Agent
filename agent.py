@@ -70,7 +70,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
-        stt=openai.STT(model=config.openai_stt_model, base_url=config.openai_base_url, api_key=config.openai_api_key),
+        stt=openai.STT(model=config.openai_stt_model, language=config.assistant_language, base_url=config.openai_base_url, api_key=config.openai_api_key),
         llm=openai.LLM(
             model=config.llm_service_model,
             base_url=config.llm_service_base_url,
