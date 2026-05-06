@@ -23,14 +23,10 @@ class CallTurnMetrics:
     assistant_speech_source: str | None = None
     assistant_text: str | None = None
     assistant_user_initiated: bool | None = None
-    turn_cm: Any | None = None
-    turn_span: Any | None = None
-    stt_cm: Any | None = None
-    stt_span: Any | None = None
-    llm_cm: Any | None = None
-    llm_span: Any | None = None
-    tts_cm: Any | None = None
-    tts_span: Any | None = None
+    turn_obs: Any | None = None
+    stt_obs: Any | None = None
+    llm_obs: Any | None = None
+    tts_obs: Any | None = None
 
     def stt_duration_ms(self) -> float | None:
         if self.stt_started_at is None or self.transcript_final_at is None:
@@ -108,33 +104,42 @@ class VoiceTraceRecorder:
         name: str,
         as_type: str = "span",
         input_payload: dict[str, Any] | None = None,
-    ) -> tuple[Any | None, Any | None]:
-        if not self.enabled or parent is None:
-            return None, None
+    ) -> Any | None:
+        """Create a Langfuse observation WITHOUT entering an OTel context.
 
-        cm = parent.start_as_current_observation(
+        Uses start_observation() instead of start_as_current_observation() to
+        avoid OTel context-manager token errors when LiveKit event handlers run
+        in different asyncio tasks.
+        """
+        if not self.enabled or parent is None:
+            return None
+
+        return parent.start_observation(
             name=name,
             as_type=as_type,
             input=input_payload or {},
         )
-        span = cm.__enter__()
-        return cm, span
 
-    def _close_observation(self, cm: Any | None, span: Any | None, *, output: dict[str, Any] | None = None) -> None:
-        if cm is None or span is None:
+    def _close_observation(self, observation: Any | None, *, output: dict[str, Any] | None = None) -> None:
+        if observation is None:
             return
         if output is not None:
-            span.update(output=output)
-        cm.__exit__(None, None, None)
+            observation.update(output=output)
+        observation.end()
 
     def _close_turn_observations(self) -> None:
         if self.current_turn is None:
             return
 
-        self._close_observation(self.current_turn.tts_cm, self.current_turn.tts_span)
-        self._close_observation(self.current_turn.llm_cm, self.current_turn.llm_span)
-        self._close_observation(self.current_turn.stt_cm, self.current_turn.stt_span)
-        self._close_observation(self.current_turn.turn_cm, self.current_turn.turn_span)
+        self._close_observation(self.current_turn.tts_obs)
+        self._close_observation(self.current_turn.llm_obs)
+        self._close_observation(self.current_turn.stt_obs)
+        self._close_observation(self.current_turn.turn_obs)
+
+        self.current_turn.tts_obs = None
+        self.current_turn.llm_obs = None
+        self.current_turn.stt_obs = None
+        self.current_turn.turn_obs = None
 
     def begin_turn(self, *, started_at: float, source: str) -> None:
         if not self.enabled:
@@ -159,14 +164,14 @@ class VoiceTraceRecorder:
             "started_at": started_at,
             "call_kind": self.call_kind,
         }
-        self.current_turn.turn_cm, self.current_turn.turn_span = self._open_observation(
+        self.current_turn.turn_obs = self._open_observation(
             self.root_span,
             name=turn_name,
             as_type="span",
             input_payload=turn_input,
         )
-        self.current_turn.stt_cm, self.current_turn.stt_span = self._open_observation(
-            self.current_turn.turn_span or self.root_span,
+        self.current_turn.stt_obs = self._open_observation(
+            self.current_turn.turn_obs or self.root_span,
             name=f"stt.transcribe.turn.{self.turn_index}",
             as_type="generation",
             input_payload={
@@ -217,8 +222,7 @@ class VoiceTraceRecorder:
         )
 
         self._close_observation(
-            self.current_turn.stt_cm,
-            self.current_turn.stt_span,
+            self.current_turn.stt_obs,
             output={
                 "turn_index": self.turn_index,
                 "transcript": transcript,
@@ -226,16 +230,15 @@ class VoiceTraceRecorder:
                 "duration_ms": self.current_turn.stt_duration_ms(),
             },
         )
-        self.current_turn.stt_cm = None
-        self.current_turn.stt_span = None
+        self.current_turn.stt_obs = None
 
         llm_input = {
             "turn_index": self.turn_index,
             "transcript": transcript,
             "language": language,
         }
-        self.current_turn.llm_cm, self.current_turn.llm_span = self._open_observation(
-            self.current_turn.turn_span or self.root_span,
+        self.current_turn.llm_obs = self._open_observation(
+            self.current_turn.turn_obs or self.root_span,
             name=f"llm.generate.turn.{self.turn_index}",
             as_type="generation",
             input_payload=llm_input,
@@ -268,8 +271,7 @@ class VoiceTraceRecorder:
         )
 
         self._close_observation(
-            self.current_turn.llm_cm,
-            self.current_turn.llm_span,
+            self.current_turn.llm_obs,
             output={
                 "turn_index": self.turn_index,
                 "assistant_text": self.current_turn.assistant_text,
@@ -278,8 +280,7 @@ class VoiceTraceRecorder:
                 "duration_ms": self.current_turn.llm_duration_ms(),
             },
         )
-        self.current_turn.llm_cm = None
-        self.current_turn.llm_span = None
+        self.current_turn.llm_obs = None
 
         tts_input: dict[str, Any] = {
             "turn_index": self.turn_index,
@@ -287,8 +288,8 @@ class VoiceTraceRecorder:
             "assistant_speech_source": self.current_turn.assistant_speech_source,
             "assistant_user_initiated": self.current_turn.assistant_user_initiated,
         }
-        self.current_turn.tts_cm, self.current_turn.tts_span = self._open_observation(
-            self.current_turn.turn_span or self.root_span,
+        self.current_turn.tts_obs = self._open_observation(
+            self.current_turn.turn_obs or self.root_span,
             name=f"tts.synthesize.turn.{self.turn_index}",
             as_type="generation",
             input_payload=tts_input,
@@ -313,16 +314,14 @@ class VoiceTraceRecorder:
         )
 
         self._close_observation(
-            self.current_turn.tts_cm,
-            self.current_turn.tts_span,
+            self.current_turn.tts_obs,
             output={
                 "turn_index": self.turn_index,
                 "duration_ms": self.current_turn.tts_duration_ms(),
                 "playback_started_at": self.current_turn.playback_started_at,
             },
         )
-        self.current_turn.tts_cm = None
-        self.current_turn.tts_span = None
+        self.current_turn.tts_obs = None
 
         self._append_turn_summary()
 
