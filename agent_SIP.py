@@ -10,6 +10,7 @@ from livekit.agents import (
     Agent,
     AgentSession,
     AutoSubscribe,
+    BackgroundAudioPlayer,
     JobContext,
     JobProcess,
     WorkerOptions,
@@ -29,6 +30,11 @@ from app.observability import (
     start_voice_trace,
 )
 from app.runtime_checks import check_llm_service, check_openai
+from app.sip_tts_debug_chime import (
+    sip_tts_debug_chime_enabled,
+    start_debug_chime_player,
+    tts_debug_chime_audio_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     close_event = asyncio.Event()
     close_reason = "unknown"
+    sip_debug_chime: BackgroundAudioPlayer | None = None
 
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
@@ -141,6 +148,8 @@ async def entrypoint(ctx: JobContext) -> None:
             @session.on("speech_created")
             def _on_speech_created(event) -> None:
                 recorder.on_speech_created(event)
+                if sip_debug_chime is not None:
+                    sip_debug_chime.play(tts_debug_chime_audio_config())
 
             @session.on("conversation_item_added")
             def _on_conversation_item_added(event) -> None:
@@ -167,11 +176,16 @@ async def entrypoint(ctx: JobContext) -> None:
                     close_on_disconnect=True,
                 ),
             )
+            if sip_tts_debug_chime_enabled():
+                sip_debug_chime = await start_debug_chime_player(room=ctx.room)
+                logger.info("SIP TTS debug chime enabled (short tone on speech_created → phone)")
             session.say("Buongiorno, come posso aiutarti?")
 
             await close_event.wait()
             recorder.finalize(output={"close_reason": close_reason})
     finally:
+        if sip_debug_chime is not None:
+            await sip_debug_chime.aclose()
         shutdown_langfuse(langfuse)
 
 
