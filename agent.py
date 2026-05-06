@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
 from livekit.plugins import openai, silero
 
+from livekit.agents.tts import StreamAdapter
 from app.config import AppConfig
 from app.logging_utils import configure_logging
 from app.observability import (
@@ -76,12 +77,15 @@ async def entrypoint(ctx: JobContext) -> None:
             base_url=config.llm_service_base_url,
             api_key=config.llm_service_api_key,
         ),
-        tts=openai.TTS(
-            model=config.openai_tts_model,
-            voice=config.openai_tts_voice,
-            base_url=config.openai_base_url,
-            api_key=config.openai_api_key,
-        ),
+                tts=StreamAdapter(
+                    tts=openai.TTS(
+                        model=config.openai_tts_model,
+                        voice=config.openai_tts_voice,
+                        base_url=config.openai_base_url,
+                        api_key=config.openai_api_key,
+                        response_format="pcm",
+                    )
+                ),
     )
 
     try:
