@@ -23,9 +23,9 @@ class CallTurnMetrics:
     assistant_speech_source: str | None = None
     assistant_text: str | None = None
     assistant_user_initiated: bool | None = None
+    turn_cm: Any | None = None
     turn_obs: Any | None = None
     stt_obs: Any | None = None
-    llm_obs: Any | None = None
     tts_obs: Any | None = None
 
     def stt_duration_ms(self) -> float | None:
@@ -97,29 +97,6 @@ class VoiceTraceRecorder:
         self._last_summary.update({k: v for k, v in metadata.items() if v is not None})
         self.root_span.update(metadata=self._last_summary.copy())
 
-    def _open_observation(
-        self,
-        parent: Any | None,
-        *,
-        name: str,
-        as_type: str = "span",
-        input_payload: dict[str, Any] | None = None,
-    ) -> Any | None:
-        """Create a Langfuse observation WITHOUT entering an OTel context.
-
-        Uses start_observation() instead of start_as_current_observation() to
-        avoid OTel context-manager token errors when LiveKit event handlers run
-        in different asyncio tasks.
-        """
-        if not self.enabled or parent is None:
-            return None
-
-        return parent.start_observation(
-            name=name,
-            as_type=as_type,
-            input=input_payload or {},
-        )
-
     def _close_observation(self, observation: Any | None, *, output: dict[str, Any] | None = None) -> None:
         if observation is None:
             return
@@ -127,18 +104,27 @@ class VoiceTraceRecorder:
             observation.update(output=output)
         observation.end()
 
+    def _close_turn_cm(self, cm: Any | None, observation: Any | None) -> None:
+        """Close a context-manager-backed observation, catching OTel detach errors."""
+        if cm is None:
+            return
+        try:
+            cm.__exit__(None, None, None)
+        except ValueError:
+            if observation is not None:
+                observation.end()
+
     def _close_turn_observations(self) -> None:
         if self.current_turn is None:
             return
 
         self._close_observation(self.current_turn.tts_obs)
-        self._close_observation(self.current_turn.llm_obs)
         self._close_observation(self.current_turn.stt_obs)
-        self._close_observation(self.current_turn.turn_obs)
+        self._close_turn_cm(self.current_turn.turn_cm, self.current_turn.turn_obs)
 
         self.current_turn.tts_obs = None
-        self.current_turn.llm_obs = None
         self.current_turn.stt_obs = None
+        self.current_turn.turn_cm = None
         self.current_turn.turn_obs = None
 
     def begin_turn(self, *, started_at: float, source: str) -> None:
@@ -164,17 +150,23 @@ class VoiceTraceRecorder:
             "started_at": started_at,
             "call_kind": self.call_kind,
         }
-        self.current_turn.turn_obs = self._open_observation(
-            self.root_span,
-            name=turn_name,
-            as_type="span",
-            input_payload=turn_input,
-        )
-        self.current_turn.stt_obs = self._open_observation(
-            self.current_turn.turn_obs or self.root_span,
+
+        # Use start_as_current_observation for the turn span so that LiveKit's
+        # own OTel instrumentation (llm_request, etc.) nests correctly inside it.
+        # We catch OTel detach errors in _close_turn_cm because event handlers
+        # and finalize() may run in different asyncio tasks.
+        if self.root_span is not None:
+            self.current_turn.turn_cm = self.root_span.start_as_current_observation(
+                name=turn_name,
+                as_type="span",
+                input=turn_input,
+            )
+            self.current_turn.turn_obs = self.current_turn.turn_cm.__enter__()
+
+        self.current_turn.stt_obs = self.current_turn.turn_obs.start_observation(
             name=f"stt.transcribe.turn.{self.turn_index}",
             as_type="generation",
-            input_payload={
+            input={
                 "turn_index": self.turn_index,
                 "source": source,
                 "started_at": started_at,
@@ -232,18 +224,6 @@ class VoiceTraceRecorder:
         )
         self.current_turn.stt_obs = None
 
-        llm_input = {
-            "turn_index": self.turn_index,
-            "transcript": transcript,
-            "language": language,
-        }
-        self.current_turn.llm_obs = self._open_observation(
-            self.current_turn.turn_obs or self.root_span,
-            name=f"llm.generate.turn.{self.turn_index}",
-            as_type="generation",
-            input_payload=llm_input,
-        )
-
     def on_speech_created(self, event: Any) -> None:
         if not self.enabled or self.current_turn is None:
             return
@@ -265,22 +245,10 @@ class VoiceTraceRecorder:
             assistant_user_initiated=self.current_turn.assistant_user_initiated,
         )
         logger.info(
-            "Langfuse turn %s LLM completed at %.3f (speech created)",
+            "Langfuse turn %s LLM done at %.3f — LiveKit llm_request span carries real timing",
             self.turn_index,
             float(created_at) if created_at is not None else time.perf_counter(),
         )
-
-        self._close_observation(
-            self.current_turn.llm_obs,
-            output={
-                "turn_index": self.turn_index,
-                "assistant_text": self.current_turn.assistant_text,
-                "assistant_speech_source": self.current_turn.assistant_speech_source,
-                "assistant_user_initiated": self.current_turn.assistant_user_initiated,
-                "duration_ms": self.current_turn.llm_duration_ms(),
-            },
-        )
-        self.current_turn.llm_obs = None
 
         tts_input: dict[str, Any] = {
             "turn_index": self.turn_index,
@@ -288,11 +256,10 @@ class VoiceTraceRecorder:
             "assistant_speech_source": self.current_turn.assistant_speech_source,
             "assistant_user_initiated": self.current_turn.assistant_user_initiated,
         }
-        self.current_turn.tts_obs = self._open_observation(
-            self.current_turn.turn_obs or self.root_span,
+        self.current_turn.tts_obs = (self.current_turn.turn_obs or self.root_span).start_observation(
             name=f"tts.synthesize.turn.{self.turn_index}",
             as_type="generation",
-            input_payload=tts_input,
+            input=tts_input,
         )
 
     def on_playback_started(self, event: Any) -> None:
