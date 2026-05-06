@@ -68,18 +68,69 @@ def run_lk(*args: str) -> int:
     return completed.returncode
 
 
+
+def _delete_existing(*, resource: str, label: str) -> None:
+    """Delete existing SIP resources of the given type before recreating."""
+    try:
+        result = subprocess.run(
+            [str(LK_BIN), "sip", resource, "list"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            print(f"Could not list {label}s (exit {result.returncode}), skipping delete.", flush=True)
+            return
+
+        # Try JSON parsing first (some LK CLI versions support structured output)
+        ids: list[str] = []
+        stripped = result.stdout.strip()
+        if stripped.startswith("[") or stripped.startswith("{"):
+            import json
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, list):
+                    ids = [
+                        str(entry[key])
+                        for entry in data
+                        for key in ("id", "sipInboundId", "sipDispatchRuleId")
+                        if key in entry and not isinstance(entry.get(key), (list, dict))
+                    ]
+                elif isinstance(data, dict):
+                    for key in ("id", "sipInboundId", "sipDispatchRuleId"):
+                        if key in data:
+                            ids.append(str(data[key]))
+                            break
+            except json.JSONDecodeError:
+                pass
+
+        # If no IDs found via JSON, scan output lines for UUIDs
+        if not ids:
+            import re
+            ids = re.findall(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                stripped,
+            )
+
+        for resource_id in ids:
+            print(f"Deleting existing {label} {resource_id}...", flush=True)
+            run_lk("sip", resource, "delete", resource_id)
+    except Exception as exc:
+        print(f"Delete-existing {label}s: {exc} — continuing anyway.", flush=True)
+
 def main() -> int:
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
 
     install_lk()
     wait_for_livekit()
 
-    print("Creating SIP inbound trunk...", flush=True)
+    print("Ensuring SIP inbound trunk...", flush=True)
+    _delete_existing(resource="inbound", label="trunk")
     run_lk("sip", "inbound", "create", str(TRUNK_FILE))
 
-    print("Creating SIP dispatch rule...", flush=True)
+    print("Ensuring SIP dispatch rule...", flush=True)
+    _delete_existing(resource="dispatch", label="dispatch rule")
     run_lk("sip", "dispatch", "create", str(DISPATCH_FILE))
-
     print("Current SIP inbound trunks:", flush=True)
     run_lk("sip", "inbound", "list")
 
