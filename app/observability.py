@@ -7,11 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from langfuse import Langfuse, get_client, propagate_attributes
-from openinference.instrumentation.openai import OpenAIInstrumentor
 
 logger = logging.getLogger(__name__)
-
-_LANGFUSE_INSTRUMENTED = False
 
 
 @dataclass(slots=True)
@@ -23,58 +20,7 @@ class CallTurnMetrics:
     playback_started_at: float | None = None
     user_transcript: str | None = None
     user_language: str | None = None
-    assistant_speech_source: str | None = None
     assistant_text: str | None = None
-    assistant_user_initiated: bool | None = None
-    turn_cm: Any | None = None
-    turn_obs: Any | None = None
-    stt_obs: Any | None = None
-    tts_obs: Any | None = None
-    _llm_ttft_ms: float | None = None
-    _llm_duration_ms_real: float | None = None
-    _llm_prompt_tokens: int | None = None
-    _llm_completion_tokens: int | None = None
-    _llm_cost_total: float | None = None
-
-    @property
-    def llm_ttft_ms(self) -> float | None:
-        return self._llm_ttft_ms
-
-    @llm_ttft_ms.setter
-    def llm_ttft_ms(self, value: float | None) -> None:
-        self._llm_ttft_ms = value
-
-    @property
-    def llm_duration_ms_real(self) -> float | None:
-        return self._llm_duration_ms_real
-
-    @llm_duration_ms_real.setter
-    def llm_duration_ms_real(self, value: float | None) -> None:
-        self._llm_duration_ms_real = value
-
-    @property
-    def llm_prompt_tokens(self) -> int | None:
-        return self._llm_prompt_tokens
-
-    @llm_prompt_tokens.setter
-    def llm_prompt_tokens(self, value: int | None) -> None:
-        self._llm_prompt_tokens = value
-
-    @property
-    def llm_completion_tokens(self) -> int | None:
-        return self._llm_completion_tokens
-
-    @llm_completion_tokens.setter
-    def llm_completion_tokens(self, value: int | None) -> None:
-        self._llm_completion_tokens = value
-
-    @property
-    def llm_cost_total(self) -> float | None:
-        return self._llm_cost_total
-
-    @llm_cost_total.setter
-    def llm_cost_total(self, value: float | None) -> None:
-        self._llm_cost_total = value
 
     def stt_duration_ms(self) -> float | None:
         if self.stt_started_at is None or self.transcript_final_at is None:
@@ -92,32 +38,15 @@ class CallTurnMetrics:
         return max(0.0, (self.playback_started_at - self.speech_created_at) * 1000.0)
 
     def as_summary(self) -> dict[str, Any]:
-        summary: dict[str, Any] = {
+        return {
             "turn_index": self.turn_index,
-            "stt_started_at": self.stt_started_at,
-            "transcript_final_at": self.transcript_final_at,
-            "speech_created_at": self.speech_created_at,
-            "playback_started_at": self.playback_started_at,
-            "user_transcript": self.user_transcript,
-            "user_language": self.user_language,
-            "assistant_speech_source": self.assistant_speech_source,
-            "assistant_text": self.assistant_text,
-            "assistant_user_initiated": self.assistant_user_initiated,
             "stt_duration_ms": self.stt_duration_ms(),
             "llm_duration_ms": self.llm_duration_ms(),
             "tts_duration_ms": self.tts_duration_ms(),
+            "user_transcript": self.user_transcript,
+            "user_language": self.user_language,
+            "assistant_text": self.assistant_text,
         }
-        if self._llm_ttft_ms is not None:
-            summary["llm_ttft_ms"] = self._llm_ttft_ms
-        if self._llm_duration_ms_real is not None:
-            summary["llm_duration_ms_real"] = self._llm_duration_ms_real
-        if self._llm_prompt_tokens is not None:
-            summary["llm_prompt_tokens"] = self._llm_prompt_tokens
-        if self._llm_completion_tokens is not None:
-            summary["llm_completion_tokens"] = self._llm_completion_tokens
-        if self._llm_cost_total is not None:
-            summary["llm_cost_usd"] = self._llm_cost_total
-        return summary
 
 
 class VoiceTraceRecorder:
@@ -131,6 +60,9 @@ class VoiceTraceRecorder:
         call_kind: str,
         agent_name: str,
         user_id: str | None,
+        stt_model: str = "gpt-4o-mini-transcribe",
+        tts_model: str = "gpt-4o-mini-tts",
+        llm_model: str = "gpt-4o-mini",
     ) -> None:
         self.enabled = enabled and root_span is not None
         self.root_span = root_span
@@ -139,10 +71,15 @@ class VoiceTraceRecorder:
         self.call_kind = call_kind
         self.agent_name = agent_name
         self.user_id = user_id
+        self.stt_model = stt_model
+        self.tts_model = tts_model
+        self.llm_model = llm_model
         self.turn_index = 0
         self.current_turn: CallTurnMetrics | None = None
-        self._last_summary: dict[str, Any] = {}
         self._turn_summaries: list[dict[str, Any]] = []
+        self._turn_obs: Any | None = None
+        self._stt_obs: Any | None = None
+        self._tts_obs: Any | None = None
 
     def _event_value(self, event: Any, *names: str) -> Any:
         for name in names:
@@ -150,88 +87,74 @@ class VoiceTraceRecorder:
                 return getattr(event, name)
         return None
 
-    def _update_root_metadata(self, **metadata: Any) -> None:
-        if not self.enabled:
-            return
-        self._last_summary.update({k: v for k, v in metadata.items() if v is not None})
-        self.root_span.update(metadata=self._last_summary.copy())
+    def _close_obs(self, obs: Any | None, **update_kwargs: Any) -> Any | None:
+        if obs is None:
+            return None
+        if update_kwargs:
+            obs.update(**update_kwargs)
+        obs.end()
+        return None
 
-    def _close_observation(self, observation: Any | None, *, output: dict[str, Any] | None = None) -> None:
-        if observation is None:
-            return
-        if output is not None:
-            observation.update(output=output)
-        observation.end()
-
-    def _close_all_turn_observations(self) -> None:
-        if self.current_turn is None:
-            return
-
-        self._close_observation(self.current_turn.tts_obs)
-        self._close_observation(self.current_turn.stt_obs)
-
-        cm = self.current_turn.turn_cm
-        obs = self.current_turn.turn_obs
-        if cm is not None:
-            try:
-                cm.__exit__(None, None, None)
-            except ValueError:
-                if obs is not None:
-                    obs.end()
-
-        self.current_turn.tts_obs = None
-        self.current_turn.stt_obs = None
-        self.current_turn.turn_cm = None
-        self.current_turn.turn_obs = None
+    def _close_current_turn(self) -> None:
+        self._tts_obs = self._close_obs(self._tts_obs)
+        self._stt_obs = self._close_obs(self._stt_obs)
+        if self.current_turn is not None and self._turn_obs is not None:
+            self._turn_obs.update(
+                output={
+                    "turn_index": self.current_turn.turn_index,
+                    "stt_duration_ms": self.current_turn.stt_duration_ms(),
+                    "llm_duration_ms": self.current_turn.llm_duration_ms(),
+                    "tts_duration_ms": self.current_turn.tts_duration_ms(),
+                    "user_transcript": self.current_turn.user_transcript,
+                    "assistant_text": self.current_turn.assistant_text,
+                }
+            )
+            self._turn_obs.end()
+            self._turn_obs = None
 
     def begin_turn(self, *, started_at: float, source: str) -> None:
         if not self.enabled:
             return
 
+        self._close_current_turn()
         if self.current_turn is not None:
-            self._close_all_turn_observations()
             self._append_turn_summary()
 
         self.turn_index += 1
-        self.current_turn = CallTurnMetrics(turn_index=self.turn_index, stt_started_at=started_at)
-        self._update_root_metadata(
+        self.current_turn = CallTurnMetrics(
             turn_index=self.turn_index,
-            active_turn_source=source,
-            active_turn_started_at=started_at,
+            stt_started_at=started_at,
         )
 
-        turn_name = f"voice.turn.{self.turn_index}"
-        turn_input = {
-            "turn_index": self.turn_index,
-            "source": source,
-            "started_at": started_at,
-            "call_kind": self.call_kind,
-        }
-
-        # Use start_as_current_observation for the turn span so it sets the OTel
-        # context.  LiveKit's own llm_request span will then nest as a child when it
-        # is created inside the same asyncio task.  The context-manager token may
-        # fail to detach if finalize() runs from a different task; we catch that in
-        # _close_all_turn_observations.
         if self.root_span is not None:
-            turn_cm = self.root_span.start_as_current_observation(
-                name=turn_name,
+            self._turn_obs = self.root_span.start_observation(
+                name=f"voice.turn.{self.turn_index}",
                 as_type="span",
-                input=turn_input,
+                input={
+                    "turn_index": self.turn_index,
+                    "source": source,
+                    "started_at": started_at,
+                },
+                metadata={
+                    "turn_index": self.turn_index,
+                    "source": source,
+                },
             )
-            self.current_turn.turn_cm = turn_cm
-            self.current_turn.turn_obs = turn_cm.__enter__()
+            self._stt_obs = self._turn_obs.start_observation(
+                name=f"stt.transcribe.turn.{self.turn_index}",
+                as_type="generation",
+                model=self.stt_model,
+                input={
+                    "turn_index": self.turn_index,
+                    "source": source,
+                    "started_at": started_at,
+                },
+                metadata={
+                    "turn_index": self.turn_index,
+                    "phase": "stt",
+                },
+            )
 
-        self.current_turn.stt_obs = (self.current_turn.turn_obs or self.root_span).start_observation(
-            name=f"stt.transcribe.turn.{self.turn_index}",
-            as_type="generation",
-            model="gpt-4o-mini-transcribe",
-            input={
-                "turn_index": self.turn_index,
-                "source": source,
-                "started_at": started_at,
-            },
-        )
         logger.info("Langfuse turn %s STT start at %.3f", self.turn_index, started_at)
 
     def on_user_state_changed(self, event: Any) -> None:
@@ -261,28 +184,24 @@ class VoiceTraceRecorder:
         self.current_turn.user_transcript = transcript
         self.current_turn.user_language = str(language) if language is not None else None
 
-        self._update_root_metadata(
-            last_transcript=transcript,
-            last_transcript_language=language,
-            last_stt_duration_ms=self.current_turn.stt_duration_ms(),
-        )
-        logger.info(
-            "Langfuse turn %s STT final at %.3f transcript='%s'",
-            self.turn_index,
-            float(created_at) if created_at is not None else time.perf_counter(),
-            transcript,
-        )
+        duration_ms = self.current_turn.stt_duration_ms()
 
-        self._close_observation(
-            self.current_turn.stt_obs,
+        self._stt_obs = self._close_obs(
+            self._stt_obs,
             output={
-                "turn_index": self.turn_index,
+                "turn_index": self.current_turn.turn_index,
                 "transcript": transcript,
                 "language": language,
-                "duration_ms": self.current_turn.stt_duration_ms(),
+                "duration_ms": duration_ms,
             },
         )
-        self.current_turn.stt_obs = None
+
+        logger.info(
+            "Langfuse turn %s STT final %.1fms transcript='%s'",
+            self.current_turn.turn_index,
+            duration_ms,
+            transcript,
+        )
 
     def on_speech_created(self, event: Any) -> None:
         if not self.enabled or self.current_turn is None:
@@ -292,35 +211,33 @@ class VoiceTraceRecorder:
         if created_at is not None:
             self.current_turn.speech_created_at = float(created_at)
 
-        speech_source = self._event_value(event, "source")
-        user_initiated = self._event_value(event, "user_initiated", "userInitiated")
-        assistant_text = self._event_value(event, "text", "content", "message", "utterance", "speech_text")
-        self.current_turn.assistant_speech_source = str(speech_source) if speech_source is not None else None
-        self.current_turn.assistant_text = str(assistant_text) if assistant_text is not None else None
-        self.current_turn.assistant_user_initiated = bool(user_initiated) if user_initiated is not None else None
-
-        self._update_root_metadata(
-            last_llm_duration_ms=self.current_turn.llm_duration_ms(),
-            assistant_speech_source=self.current_turn.assistant_speech_source,
-            assistant_user_initiated=self.current_turn.assistant_user_initiated,
+        assistant_text = self._event_value(
+            event, "text", "content", "message", "utterance", "speech_text"
         )
+        self.current_turn.assistant_text = (
+            str(assistant_text) if assistant_text is not None else None
+        )
+
+        if self._turn_obs is not None:
+            self._tts_obs = self._turn_obs.start_observation(
+                name=f"tts.synthesize.turn.{self.current_turn.turn_index}",
+                as_type="generation",
+                model=self.tts_model,
+                input={
+                    "turn_index": self.current_turn.turn_index,
+                    "assistant_text": self.current_turn.assistant_text,
+                },
+                metadata={
+                    "turn_index": self.current_turn.turn_index,
+                    "phase": "tts",
+                },
+            )
+
         logger.info(
-            "Langfuse turn %s LLM done at %.3f (LiveKit llm_request carries real LLM timing)",
-            self.turn_index,
+            "Langfuse turn %s LLM done at %.3f text='%s'",
+            self.current_turn.turn_index,
             float(created_at) if created_at is not None else time.perf_counter(),
-        )
-
-        tts_input: dict[str, Any] = {
-            "turn_index": self.turn_index,
-            "assistant_text": self.current_turn.assistant_text,
-            "assistant_speech_source": self.current_turn.assistant_speech_source,
-            "assistant_user_initiated": self.current_turn.assistant_user_initiated,
-        }
-        self.current_turn.tts_obs = (self.current_turn.turn_obs or self.root_span).start_observation(
-            name=f"tts.synthesize.turn.{self.turn_index}",
-            as_type="generation",
-            model="gpt-4o-mini-tts",
-            input=tts_input,
+            self.current_turn.assistant_text or "",
         )
 
     def on_playback_started(self, event: Any) -> None:
@@ -331,25 +248,20 @@ class VoiceTraceRecorder:
         if created_at is not None:
             self.current_turn.playback_started_at = float(created_at)
 
-        self._update_root_metadata(
-            last_tts_duration_ms=self.current_turn.tts_duration_ms(),
-            last_turn_index=self.turn_index,
-        )
-        logger.info(
-            "Langfuse turn %s TTS playback started at %.3f",
-            self.turn_index,
-            float(created_at) if created_at is not None else time.perf_counter(),
-        )
-
-        self._close_observation(
-            self.current_turn.tts_obs,
+        self._tts_obs = self._close_obs(
+            self._tts_obs,
             output={
-                "turn_index": self.turn_index,
+                "turn_index": self.current_turn.turn_index,
                 "duration_ms": self.current_turn.tts_duration_ms(),
                 "playback_started_at": self.current_turn.playback_started_at,
             },
         )
-        self.current_turn.tts_obs = None
+
+        logger.info(
+            "Langfuse turn %s TTS playback at %.3f",
+            self.current_turn.turn_index,
+            float(created_at) if created_at is not None else time.perf_counter(),
+        )
 
         self._append_turn_summary()
 
@@ -359,20 +271,17 @@ class VoiceTraceRecorder:
 
         summary = self.current_turn.as_summary()
         self._turn_summaries = [
-            existing
-            for existing in self._turn_summaries
-            if existing.get("turn_index") != summary["turn_index"]
+            t for t in self._turn_summaries if t.get("turn_index") != summary["turn_index"]
         ]
         self._turn_summaries.append(summary)
-        self._turn_summaries.sort(key=lambda item: int(item.get("turn_index", 0)))
-        self._update_root_metadata(turns=self._turn_summaries.copy())
+        self._turn_summaries.sort(key=lambda t: int(t.get("turn_index", 0)))
 
     def finalize(self, *, output: dict[str, Any] | None = None) -> None:
         if not self.enabled:
             return
 
+        self._close_current_turn()
         if self.current_turn is not None:
-            self._close_all_turn_observations()
             self._append_turn_summary()
 
         summary: dict[str, Any] = {
@@ -385,14 +294,10 @@ class VoiceTraceRecorder:
         }
         if output:
             summary.update(output)
-        if self._last_summary:
-            summary.update(self._last_summary)
         self.root_span.update(output=summary)
 
 
 def configure_langfuse_tracing(*, agent_name: str) -> Langfuse | None:
-    global _LANGFUSE_INSTRUMENTED
-
     if not os.getenv("LANGFUSE_PUBLIC_KEY") or not os.getenv("LANGFUSE_SECRET_KEY"):
         logger.info("Langfuse tracing disabled: LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are missing")
         return None
@@ -406,12 +311,6 @@ def configure_langfuse_tracing(*, agent_name: str) -> Langfuse | None:
         )
 
     client = get_client()
-
-    if not _LANGFUSE_INSTRUMENTED:
-        OpenAIInstrumentor().instrument()
-        _LANGFUSE_INSTRUMENTED = True
-        logger.info("OpenAI SDK instrumentation enabled for cost/token tracking (%s)", agent_name)
-
     logger.info("Langfuse tracing enabled for %s", agent_name)
     return client
 
