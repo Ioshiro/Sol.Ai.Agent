@@ -46,8 +46,9 @@ class FakeObservation:
     def update(self, **kwargs):
         self.updates.append(kwargs)
 
-    def end(self):
+    def end(self, *, end_time=None):
         self.ended = True
+        self.end_time = end_time
 
 
 class VoiceTraceRecorderTests(unittest.TestCase):
@@ -66,6 +67,9 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         recorder.begin_turn(started_at=1.0, source="user_state_changed")
         recorder.on_user_input_transcribed(
             SimpleNamespace(is_final=True, transcript="Pronto", language="it", created_at=2.0)
+        )
+        recorder.on_llm_metrics_collected(
+            SimpleNamespace(duration=1.5, timestamp=3.0, ttft=1.1, request_id="r1")
         )
         recorder.on_speech_created(SimpleNamespace(created_at=2.1))
         recorder.on_conversation_item_added(
@@ -89,16 +93,23 @@ class VoiceTraceRecorderTests(unittest.TestCase):
 
         llm = next(child for child in turn.children if child.name == "llm.generate.turn.1")
         self.assertTrue(llm.ended)
-        self.assertEqual(llm.updates[-1]["output"]["assistant_text"], None)
-        self.assertAlmostEqual(llm.updates[-1]["output"]["duration_ms"], 100.0)
+        self.assertEqual(llm.updates[-1]["output"]["assistant_text"], "Certo, dimmi pure.")
+        self.assertAlmostEqual(llm.updates[-1]["output"]["duration_ms"], 1500.0)
+        self.assertEqual(llm.end_time, 3000000000)
+
+        tts = next(child for child in turn.children if child.name == "tts.synthesize.turn.1")
+        self.assertTrue(tts.ended)
+        self.assertEqual(tts.updates[-1]["input"]["assistant_text"], "Certo, dimmi pure.")
+        self.assertAlmostEqual(tts.updates[-1]["output"]["duration_ms"], 2900.0)
+        self.assertEqual(tts.end_time, 5000000000)
+
         root_output = root.updates[-1]["output"]
         self.assertEqual(root_output["turn_count"], 1)
         self.assertEqual(root_output["turns"][0]["assistant_text"], "Certo, dimmi pure.")
-        self.assertAlmostEqual(root_output["turns"][0]["llm_duration_ms"], 100.0)
+        self.assertAlmostEqual(root_output["turns"][0]["llm_duration_ms"], 1500.0)
         self.assertAlmostEqual(root_output["turns"][0]["tts_duration_ms"], 2900.0)
         self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 4.0)
         self.assertEqual(root_output["close_reason"], "done")
-
 
     def test_assistant_commit_is_assigned_to_original_turn(self) -> None:
         root = FakeObservation(name="root", as_type="span")
@@ -116,7 +127,11 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         recorder.on_user_input_transcribed(
             SimpleNamespace(is_final=True, transcript="Pronto", language="it", created_at=2.0)
         )
+        recorder.on_llm_metrics_collected(
+            SimpleNamespace(duration=1.5, timestamp=3.0, ttft=1.1, request_id="r1")
+        )
         recorder.on_speech_created(SimpleNamespace(created_at=2.1))
+        recorder.on_playback_started(SimpleNamespace(created_at=2.5))
 
         recorder.begin_turn(started_at=5.0, source="user_state_changed")
         recorder.on_conversation_item_added(
@@ -125,7 +140,6 @@ class VoiceTraceRecorderTests(unittest.TestCase):
                 created_at=6.0,
             )
         )
-        recorder.on_playback_started(SimpleNamespace(created_at=6.5))
         recorder.finalize(output={"close_reason": "done"})
 
         root_output = root.updates[-1]["output"]
@@ -133,6 +147,7 @@ class VoiceTraceRecorderTests(unittest.TestCase):
         self.assertEqual(root_output["turns"][0]["assistant_text"], "Certo, dimmi pure.")
         self.assertEqual(root_output["turns"][0]["assistant_committed_at"], 6.0)
         self.assertEqual(root_output["turns"][1]["assistant_text"], None)
+
 
 
 if __name__ == "__main__":

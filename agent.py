@@ -118,6 +118,9 @@ async def entrypoint(ctx: JobContext) -> None:
             def _on_conversation_item_added(event) -> None:
                 recorder.on_conversation_item_added(event)
 
+            @session.llm.on("metrics_collected")
+            def _on_llm_metrics_collected(metrics) -> None:
+                recorder.on_llm_metrics_collected(metrics)
             async def _attach_tts_start_logger() -> None:
                 while session.output.audio is None:
                     await asyncio.sleep(0.05)
